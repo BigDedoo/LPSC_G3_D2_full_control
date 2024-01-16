@@ -16,9 +16,6 @@ class ThreadedSerial(QObject):
         # Initialize the serial port
         self.ser = serial.Serial(self.COM_PORT, self.BAUD_RATE, timeout=self.TIMEOUT)
 
-        # Create a lock for console output
-        self.print_lock = threading.Lock()
-
         # Create a condition variable to signal when data is received
         self.data_received = threading.Condition()
 
@@ -36,7 +33,8 @@ class ThreadedSerial(QObject):
                     with self.data_received:
                         self.received_data = data
                         self.data_received.notify()
-                        self.received_data_signal.emit(data.decode('utf-8'))  # Emit the received data to str
+                        # Emit the received data to str
+                        self.received_data_signal.emit(data.decode('utf-8'))
 
         except KeyboardInterrupt:
             # Handle Ctrl+C to exit the loop
@@ -60,8 +58,7 @@ class ThreadedSerial(QObject):
                 # Wait for a response from the serial port
                 with self.data_received:
                     self.data_received.wait()
-                    with self.print_lock:
-                        print(f'Received data: {self.received_data.decode("utf-8")}')
+                    print(f'Received data: {self.received_data.decode("utf-8")}')
 
                 # Wait for one second before sending the next command
                 time.sleep(1)
