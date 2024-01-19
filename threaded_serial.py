@@ -27,21 +27,86 @@ class ThreadedSerial(QObject):
         # Queue for storing received data
         self.data_queue = queue.Queue()
 
+        self.read_thread = threading.Thread(target=self.read_serial_data)
+        self.acq_thread = threading.Thread(target=self.run_acq)
+        self.new_data_available = False
+
 
     def read_serial_data(self):
         try:
             while True:
-                data = self.ser.readline().strip()
-                if data:
+                # Read data from the serial port
+                self.received_data = self.ser.readline().strip()
+
+                # Check if there's any data
+                if self.received_data:
+                    with self.data_received:
+                        self.data_received.notify()
                     # Put data in queue
-                    self.data_queue.put(data.decode('utf-8'))
-                    self.received_data_signal.emit(data.decode('utf-8'))
+                    self.data_queue.put(self.received_data.decode('utf-8'))
+                    self.received_data_signal.emit(self.received_data.decode('utf-8'))
+
         except KeyboardInterrupt:
+            # Handle Ctrl+C to exit the loop
             print('Serial reading stopped.')
+
         finally:
+            # Close the serial port when done
             self.ser.close()
 
-    def send_serial_data(self):
+    def send_serial_data(self, command):
+        # Convert the command to hexadecimal and append carriage return
+        hex_command = ''.join(format(ord(char), '02X') for char in command)
+        full_command = f"{hex_command}0D"
+        command_bytes = bytes.fromhex(''.join(full_command.split()))
+
+        # Send the command
+        self.ser.write(command_bytes)
+
+        # Wait for a response from the serial port
+        with self.data_received:
+            self.data_received.wait()
+            print(f'Received data: {self.received_data.decode("utf-8")}')
+
+    def run_acq(self):
+        collecting_data = False
+        collected_data = []
+
+        while True:
+            if not collecting_data:
+                # Send 'A' command
+                self.send_serial_data('A')
+
+            # Wait for data to be available in the data_queue
+            while self.data_queue.empty():
+                time.sleep(1)
+
+            while not self.data_queue.empty():
+                received_str = self.data_queue.get()
+                if received_str == 'F':
+                    collecting_data = True
+                    self.send_serial_data('D')  # Send 'D' command after receiving 'F'
+
+                if collecting_data:
+                    collected_data.append(received_str)  # Collect the data
+
+                if received_str == '00000000,00000000' and collecting_data:
+                    try:
+                        # Write the collected data to a CSV file
+                        with open('received_data.csv', 'w', newline='') as file:
+                            writer = csv.writer(file)
+                            writer.writerow(['Received Data'])
+                            for data in collected_data:
+                                writer.writerow([data])
+                        print("CSV file written successfully.")
+                        return  # Exit the method after writing to CSV
+                    except Exception as e:
+                        print(f"Error writing to CSV file: {e}")
+
+                new_data_received = True  # Flag that new data has been processed
+
+
+    def test(self):
         try:
             while True:
                 # Automatically send 'R' command every second
@@ -55,7 +120,6 @@ class ThreadedSerial(QObject):
                 # Wait for a response from the serial port
                 with self.data_received:
                     self.data_received.wait()
-                    print(f'Received data: {self.received_data.decode("utf-8")}')
 
                 # Wait for one second before sending the next command
                 time.sleep(1)
@@ -67,56 +131,3 @@ class ThreadedSerial(QObject):
         finally:
             # Close the serial port when done
             self.ser.close()
-
-    def run_acq(self):
-        collecting_data = False
-        collected_data = []
-
-        while True:
-            # Send 'A' command
-            command = 'A'
-            hex_command = ''.join(format(ord(char), '02X') for char in command)
-            full_command = f"{hex_command}0D"
-            command_bytes = bytes.fromhex(''.join(full_command.split()))
-            self.ser.write(command_bytes)
-
-            # Wait for a response from the serial port
-            while not self.data_queue.empty():
-                received_str = self.data_queue.get()
-                print(f'Received data: {received_str}')
-
-                if received_str == 'F':
-                    collecting_data = True
-                    # Send 'D' command
-                    command = 'D'
-                    hex_command = ''.join(format(ord(char), '02X') for char in command)
-                    full_command = f"{hex_command}0D"
-                    command_bytes = bytes.fromhex(''.join(full_command.split()))
-                    self.ser.write(command_bytes)
-
-                # Collect all data after 'F' is received
-                if collecting_data:
-                    collected_data.append(received_str)
-                    print(collected_data)
-
-                # Check if '00000000,00000000' is received, then stop collecting data
-                if received_str == '00000000,00000000' and collecting_data:
-                    # Write collected data to a CSV file
-                    with open('received_data.csv', 'w', newline='') as file:
-                        writer = csv.writer(file)
-                        writer.writerow(['Received Data'])
-                        for data in collected_data:
-                            writer.writerow([data])
-                    break  # Stop the loop
-
-            # Wait for 10 seconds before sending the next 'A' command
-            time.sleep(10)
-
-    def start_threads(self):
-        # Create separate threads for reading and sending data
-        read_thread = threading.Thread(target=self.read_serial_data)
-        send_thread = threading.Thread(target=self.run_acq)
-
-        # Start the threads
-        read_thread.start()
-        send_thread.start()

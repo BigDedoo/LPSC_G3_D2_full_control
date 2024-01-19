@@ -1,8 +1,10 @@
 import sys
 import os
+import threading
+
 import pandas as pd
 import plotly.graph_objs as go
-from PyQt5.QtCore import QUrl
+from PyQt5.QtCore import QUrl, QThread
 from PyQt5.QtWidgets import QHBoxLayout, QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, \
     QTabWidget
 from PyQt5.QtWebEngineWidgets import QWebEngineView
@@ -14,8 +16,8 @@ class MainWindow(QWidget):
         super().__init__()
 
         self.serial_communication = SerialCommunication()
-        self.serial_communication.ACK_SIGNAL.connect(self.handle_ack)  # Connect ACK signal
-        self.serial_communication.NAK_SIGNAL.connect(self.handle_nak)  # Connect NAK signal
+        self.serial_communication.ACK_SIGNAL.connect(self.handle_ack)
+        self.serial_communication.NAK_SIGNAL.connect(self.handle_nak)
 
         self.ack_response = None
         self.nak_response = None
@@ -24,7 +26,7 @@ class MainWindow(QWidget):
         self.threaded_serial.received_data_signal.connect(self.handle_received_data)
 
         # Start threaded serial communication
-        self.threaded_serial.start_threads()
+        self.threaded_serial.read_thread.start()
 
         self.init_ui()
 
@@ -62,51 +64,12 @@ class MainWindow(QWidget):
         self.measurements_push_layout = QVBoxLayout()
 
         # Add four push buttons to the measurements tab
-        self.zero_x = QPushButton('Zero X')
-        self.zero_y = QPushButton('Zero Y')
-        self.acq_x = QPushButton('Acq X')
-        self.acq_y = QPushButton('Acq Y')
+        self.button_acq = QPushButton('Seq')
 
-        self.measurements_push_layout.addWidget(self.zero_x)
-        self.measurements_push_layout.addWidget(self.zero_y)
-        self.measurements_push_layout.addWidget(self.acq_x)
-        self.measurements_push_layout.addWidget(self.acq_y)
+        self.measurements_push_layout.addWidget(self.button_acq)
 
-        # Connect buttons directly to the send_sequence_of_commands method with the respective command list
-        self.zero_x.clicked.connect(lambda: self.send_sequence_of_commands(['X0+', 'X0-']))
-        self.zero_y.clicked.connect(lambda: self.send_sequence_of_commands(['Y0+', 'Y0-']))
-        self.acq_x.clicked.connect(lambda: self.send_incremental_command())
-        self.acq_y.clicked.connect(lambda: self.send_sequence_of_commands(['YA-100', 'YA-200', 'YA-400', 'YA-300']))
-
-        # Add on/off indicators to the measurements tab
-        self.indicator_layout = QHBoxLayout()
-
-        self.indicator_layout.addWidget(QLabel('X+: '))
-        self.x_plus_indicator = QLabel()
-        self.x_plus_indicator.setMaximumHeight(50)
-        self.indicator_layout.addWidget(self.x_plus_indicator)
-
-        self.indicator_layout.addWidget(QLabel('X-: '))
-        self.x_minus_indicator = QLabel()
-        self.x_minus_indicator.setMaximumHeight(50)
-        self.indicator_layout.addWidget(self.x_minus_indicator)
-
-        self.indicator_layout.addWidget(QLabel('Y+: '))
-        self.y_plus_indicator = QLabel()
-        self.y_plus_indicator.setMaximumHeight(50)
-        self.indicator_layout.addWidget(self.y_plus_indicator)
-
-        self.indicator_layout.addWidget(QLabel('Y-: '))
-        self.y_minus_indicator = QLabel()
-        self.y_minus_indicator.setMaximumHeight(50)
-        self.indicator_layout.addWidget(self.y_minus_indicator)
-
-        self.measurements_push_layout.addLayout(self.indicator_layout)
-
-        # Add the "Update" button
-        self.update_button_measurements = QPushButton('Update LS')
-
-        self.measurements_push_layout.addWidget(self.update_button_measurements)
+        # Connect buttons directly to the acq_sequence method
+        self.button_acq.clicked.connect(self.start_acq_thread)
 
         # Add the layout to the measurements tab
         self.measurements_layout.addLayout(self.measurements_push_layout)
@@ -142,9 +105,9 @@ class MainWindow(QWidget):
         # Example: Initialize Plotly graph
         self.init_plotly_graph()
 
-    def send_serial_command(self):
-        # Simulate sending a command
-        self.serial_communication.send_command("SUI")
+    def start_acq_thread(self):
+        acq_thread = threading.Thread(target=self.threaded_serial.run_acq)
+        acq_thread.start()
 
     def handle_ack(self, response):
         # Handle ACK response
