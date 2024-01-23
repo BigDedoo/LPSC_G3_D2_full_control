@@ -93,6 +93,11 @@ class MainWindow(QWidget):
         # Connect the button click event to the function
         self.send_button.clicked.connect(self.on_send_button_click)
 
+        # Create a new button for plotting
+        self.plot_button = QPushButton('Plot Data')
+        self.plot_button.clicked.connect(self.plot_data_from_csv)
+        self.measurements_layout.addWidget(self.plot_button)
+
         # Set up the main window
         self.setWindowTitle('Serial Port Communication')
 
@@ -104,6 +109,39 @@ class MainWindow(QWidget):
 
         # Example: Initialize Plotly graph
         self.init_plotly_graph()
+        #self.plot_data_from_csv().
+
+    def plot_data_from_csv(self, csv_file_path='received_data.csv'):
+        # Read the CSV file into a DataFrame
+        df = pd.read_csv(csv_file_path, header=None)
+
+        # Convert each value from hexadecimal to decimal
+        df_decimal = df.map(lambda x: int(str(x), 16))
+
+        # Create a Plotly graph
+        fig = go.Figure()
+
+        # Assuming each column is a separate set of data
+        for col in df.columns:
+            fig.add_trace(go.Scatter(y=df_decimal[col], mode='lines', name=f'Set {col + 1}'))
+
+        # Update layout
+        fig.update_layout(
+            title='Data Sets from CSV',
+            xaxis_title='Index',
+            yaxis_title='Value',
+            legend_title='Data Sets'
+        )
+
+
+        plotly_html_path = os.path.abspath('plotly_graph.html')
+        fig.write_html(plotly_html_path)
+
+        # Display the HTML file in the QWebEngineView
+        self.plotly_view.setUrl(QUrl.fromLocalFile(plotly_html_path))
+
+
+
 
     def start_acq_thread(self):
         acq_thread = threading.Thread(target=self.threaded_serial.run_acq)

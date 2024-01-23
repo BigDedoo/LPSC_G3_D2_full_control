@@ -86,25 +86,28 @@ class ThreadedSerial(QObject):
                 if received_str == 'F':
                     collecting_data = True
                     self.send_serial_data('D')  # Send 'D' command after receiving 'F'
-
-                if collecting_data:
-                    collected_data.append(received_str)  # Collect the data
+                    continue  # Skip appending 'F' to collected_data
 
                 if received_str == '00000000,00000000' and collecting_data:
                     try:
                         # Write the collected data to a CSV file
                         with open('received_data.csv', 'w', newline='') as file:
                             writer = csv.writer(file)
-                            writer.writerow(['Received Data'])
                             for data in collected_data:
-                                writer.writerow([data])
+                                data_list = data.split(',')
+                                writer.writerow(data_list)  # Write the list of values
                         print("CSV file written successfully.")
                         return  # Exit the method after writing to CSV
                     except Exception as e:
                         print(f"Error writing to CSV file: {e}")
 
-                new_data_received = True  # Flag that new data has been processed
-
+                if collecting_data:
+                    collected_data.append(received_str)  # Collect the data
+            """
+            # Reset for the next cycle
+            collecting_data = False
+            collected_data = []
+            """
 
     def test(self):
         try:
