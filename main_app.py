@@ -1,21 +1,23 @@
 import sys
 import os
 import threading
-
 import pandas as pd
 import plotly.graph_objs as go
+
+from motor_model import MotorModel
+from motor_controler import MotorControler
+from threaded_serial import ThreadedSerial
+
 from PyQt5.QtCore import QUrl, QThread
 from PyQt5.QtWidgets import QHBoxLayout, QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, \
     QTabWidget
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from serial_communication import SerialCommunication
-from threaded_serial import ThreadedSerial
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.serial_communication = SerialCommunication()
+        self.serial_communication = MotorControler()
         self.serial_communication.ACK_SIGNAL.connect(self.handle_ack)
         self.serial_communication.NAK_SIGNAL.connect(self.handle_nak)
 
@@ -167,7 +169,7 @@ class MainWindow(QWidget):
         user_text_command = self.entry.text()
 
         # Send the command to the serial port
-        self.serial_communication.send_command(user_text_command)
+        self.serial_communication.handle_user_input(user_text_command)
 
         if self.ack_response is not None:
             self.text_output.append(f"Command '{user_text_command}': \n{self.ack_response}\n")
