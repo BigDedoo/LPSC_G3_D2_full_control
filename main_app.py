@@ -6,7 +6,9 @@ import plotly.graph_objs as go
 
 from motor_model import MotorModel
 from motor_controler import MotorControler
-from threaded_serial import ThreadedSerial
+from acq_model import AcqModel
+from acq_controller import AcqController
+
 
 from PyQt5.QtCore import QUrl, QThread
 from PyQt5.QtWidgets import QHBoxLayout, QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, \
@@ -24,11 +26,12 @@ class MainWindow(QWidget):
         self.ack_response = None
         self.nak_response = None
 
-        self.threaded_serial = ThreadedSerial('COM4', 9600)
-        self.threaded_serial.received_data_signal.connect(self.handle_received_data)
+        self.threaded_serial = AcqController()
+        self.threaded_serial.acq_received_data_signal.connect(self.handle_received_data)
 
         # Start threaded serial communication
-        self.threaded_serial.read_thread.start()
+        self.threaded_serial.start_reading()
+        self.threaded_serial.start_writing()
 
         self.init_ui()
 
