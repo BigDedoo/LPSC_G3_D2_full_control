@@ -14,6 +14,51 @@ class AcqController(QObject):
         self.read_thread = None
         self.write_thread = None
 
+        self.latest_data = None  # Shared variable for the latest received data
+        self.data_lock = threading.Lock()  # Lock for thread safety
+        self.acq_received_data_signal.connect(self.on_data_received)
+
+        self.sequence_thread = None  # Thread for the special sequence
+
+
+    def on_data_received(self, data):
+        # Method to handle data received and update the shared variable
+        with self.data_lock:
+            self.latest_data = data
+
+    def start_acq_collect_sequence(self):
+        if not self.sequence_thread or not self.sequence_thread.is_alive():
+            self.sequence_thread = threading.Thread(target=self.acq_collect_sequence, daemon=True)
+            self.sequence_thread.start()
+
+    def acq_collect_sequence(self):
+        collecting_data = False
+        collected_data = []
+
+        while True:
+            if not collecting_data:
+                self.serial_comm.send_serial_data('A')
+                time.sleep(1)  # Wait for one second
+
+            with self.data_lock:
+                response = self.latest_data
+
+            if response == 'F' and not collecting_data:
+                collecting_data = True
+                self.serial_comm.send_serial_data('D')  # Send 'D' after receiving 'F'
+
+            elif response == '00000000,00000000' and collecting_data:
+                # Stop collecting and break the loop
+                break
+
+            if collecting_data and response != 'F':
+                collected_data.append(response)  # Collect the data
+        with open('collected_data.csv', 'w', newline='') as file:
+            writer = csv.writer(file)
+            for data in collected_data:
+                data_list = data.split(',')
+                writer.writerow(data_list)
+
     def start_reading(self):
         if not self.read_thread or not self.read_thread.is_alive():
             self.read_thread = threading.Thread(target=self.threaded_read_serial_data, daemon=True)

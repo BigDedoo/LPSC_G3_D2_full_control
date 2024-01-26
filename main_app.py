@@ -31,7 +31,7 @@ class MainWindow(QWidget):
 
         # Start threaded serial communication
         self.threaded_serial.start_reading()
-        self.threaded_serial.start_writing()
+        #self.threaded_serial.start_writing()
 
         self.init_ui()
 
@@ -74,7 +74,7 @@ class MainWindow(QWidget):
         self.measurements_push_layout.addWidget(self.button_acq)
 
         # Connect buttons directly to the acq_sequence method
-        self.button_acq.clicked.connect(self.start_acq_thread)
+        self.button_acq.clicked.connect(self.threaded_serial.start_acq_collect_sequence)
 
         # Add the layout to the measurements tab
         self.measurements_layout.addLayout(self.measurements_push_layout)
@@ -146,11 +146,6 @@ class MainWindow(QWidget):
         self.plotly_view.setUrl(QUrl.fromLocalFile(plotly_html_path))
 
 
-
-
-    def start_acq_thread(self):
-        acq_thread = threading.Thread(target=self.threaded_serial.run_acq)
-        acq_thread.start()
 
     def handle_ack(self, response):
         # Handle ACK response

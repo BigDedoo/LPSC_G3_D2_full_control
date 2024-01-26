@@ -29,11 +29,3 @@ class AcqModel(QObject):
             full_command = f"{hex_command}0D"
             command_bytes = bytes.fromhex(''.join(full_command.split()))
             self.ser.write(command_bytes)
-
-    def start_reading_thread(self):
-        read_thread = threading.Thread(target=self.read_serial_data, daemon=True)
-        read_thread.start()
-
-    def start_writing_thread(self, command):
-        write_thread = threading.Thread(target=lambda: self.send_serial_data(command), daemon=True)
-        write_thread.start()
