@@ -3,13 +3,17 @@ import os
 import threading
 import pandas as pd
 import plotly.graph_objs as go
+import plotly.express as px
+import qdarkstyle
+
 
 from motor_model import MotorModel
 from motor_controler import MotorControler
 from acq_model import AcqModel
 from acq_controller import AcqController
+from data_management import *
 
-
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import QUrl, QThread
 from PyQt5.QtWidgets import QHBoxLayout, QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QTextEdit, \
     QTabWidget
@@ -30,7 +34,9 @@ class MainWindow(QWidget):
         self.threaded_serial.acq_received_data_signal.connect(self.handle_received_data)
 
         # Start threaded serial communication
+
         self.threaded_serial.start_reading()
+
         #self.threaded_serial.start_writing()
 
         self.init_ui()
@@ -116,34 +122,42 @@ class MainWindow(QWidget):
         self.init_plotly_graph()
         #self.plot_data_from_csv().
 
-    def plot_data_from_csv(self, csv_file_path='received_data.csv'):
-        # Read the CSV file into a DataFrame
-        df = pd.read_csv(csv_file_path, header=None)
+    def plot_data_from_csv(self, csv_file_path='data/collected_data_centered.csv'):
+        # Read and convert the CSV files
+        df1 = read_and_convert_csv('data/collected_data_centered.csv').iloc[:, [1]]
+        df2 = read_and_convert_csv('data/collected_data_centered_2.csv').iloc[:, [1]]
 
-        # Convert each value from hexadecimal to decimal
-        df_decimal = df.map(lambda x: int(str(x), 16))
 
-        # Create a Plotly graph
-        fig = go.Figure()
+        df1.columns = ['DataSet1']
+        df2.columns = ['DataSet2']
+        df = pd.concat([df1, df2], axis=1)
 
-        # Assuming each column is a separate set of data
-        for col in df.columns:
-            fig.add_trace(go.Scatter(y=df_decimal[col], mode='lines', name=f'Set {col + 1}'))
+        if df.shape[1] != 2:
+            raise ValueError("DataFrame must have exactly two columns")
 
-        # Update layout
+        num_rows = df.shape[0]
+        # Initialize a 2D array for the 3D map data
+        map_data = np.zeros((num_rows, num_rows))
+
+        # Calculate the sum for each combination of row numbers
+        for i in range(num_rows):
+            for j in range(num_rows):
+                map_data[i, j] = df.iloc[i, 0] + df.iloc[j, 1]
+
+        # Create the 3D map
+        fig = go.Figure(data=[go.Surface(z=map_data, x=np.arange(num_rows), y=np.arange(num_rows))])
         fig.update_layout(
-            title='Data Sets from CSV',
-            xaxis_title='Index',
-            yaxis_title='Value',
-            legend_title='Data Sets'
+            title='Beam density in the XY plane',
+            scene=dict(
+                xaxis_title='X (mm)',
+                yaxis_title='Y (mm)',
+                zaxis_title='Density (muA)'
+            )
         )
-
+        fig.show()
 
         plotly_html_path = os.path.abspath('plotly_graph.html')
         fig.write_html(plotly_html_path)
-
-        # Display the HTML file in the QWebEngineView
-        self.plotly_view.setUrl(QUrl.fromLocalFile(plotly_html_path))
 
 
 
@@ -179,6 +193,8 @@ class MainWindow(QWidget):
         self.thread_output.append(f'Received data: {data}')
 
     def init_plotly_graph(self):
+        plotly_html_path = os.path.abspath('plotly_graph.html')
+        '''
         # Read data from a csv
         z_data = pd.read_csv('https://raw.githubusercontent.com/plotly/datasets/master/api_docs/mt_bruno_elevation.csv')
 
@@ -189,15 +205,16 @@ class MainWindow(QWidget):
                           margin=dict(l=65, r=50, b=65, t=90))
 
         # Save the Plotly graph as an HTML file
-        plotly_html_path = os.path.abspath('plotly_graph.html')
         fig.write_html(plotly_html_path)
-
+        '''
         # Display the HTML file in the QWebEngineView
         self.plotly_view.setUrl(QUrl.fromLocalFile(plotly_html_path))
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
+
     main_window = MainWindow()
     main_window.show()
     sys.exit(app.exec_())
