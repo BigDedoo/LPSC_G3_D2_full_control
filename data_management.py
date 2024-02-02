@@ -30,18 +30,38 @@ def read_and_convert_csv(file_path):
         print(f"An error occurred: {e}")
 
     return None  # Return None in case of failure
-def plot_3d_heatmap(df):
 
-    # Extracting X and Y values from the DataFrame
-    # Pivot the DataFrame to create a matrix suitable for a heatmap
-    heatmap_data = df.pivot_table(index=df.columns[1], columns=df.columns[0], aggfunc='size', fill_value=0)
+def read_csv_to_dataframe(file_path):
+    try:
+        # Read the CSV file
+        df = pd.read_csv(file_path)
 
-    # Create the heatmap
-    fig = go.Figure(data=go.Heatmap(
-        z=heatmap_data.values,
-        x=heatmap_data.columns,
-        y=heatmap_data.index
-    ))
+        # Check if the DataFrame has exactly two columns
+        if df.shape[1] != 2:
+            raise ValueError("The CSV file must have exactly two columns")
 
-    fig.update_layout(title='Heatmap', xaxis_title=df.columns[0], yaxis_title=df.columns[1])
-    fig.show()
+        return df
+
+    except FileNotFoundError:
+        print(f"File not found: {file_path}")
+        return None
+    except pd.errors.EmptyDataError:
+        print(f"No data: {file_path}")
+        return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+
+def find_max_values(df):
+    # Ensure the DataFrame has the expected number of columns
+    if df.shape[1] != 2:
+        raise ValueError("DataFrame must have exactly two columns")
+
+    # Find the maximum value in each column
+    max_col_1 = df.iloc[:, 0].max()
+    max_col_2 = df.iloc[:, 1].max()
+
+    # Find the overall maximum value between the two columns
+    overall_max = max(max_col_1, max_col_2)
+
+    return max_col_1, max_col_2, overall_max
