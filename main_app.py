@@ -150,8 +150,6 @@ class MainWindow(QWidget):
         self.measurements_layout.addLayout(self.info_and_graph_layout)
         self.measurements_layout.addLayout(self.buttons_layout)
 
-
-
     def setup_connections(self):
         # Connect signals and slots
         self.send_button.clicked.connect(self.on_send_button_click)
