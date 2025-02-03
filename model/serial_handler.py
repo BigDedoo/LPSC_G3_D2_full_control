@@ -39,6 +39,8 @@ class SerialHandler:
                     logger.debug(f"Written bytes to {self.port}: {data}")
                 except Exception as e:
                     logger.error(f"Error writing to serial port {self.port}: {e}")
+            else:
+                logger.warning("Serial port is not open when trying to write.")
 
     def read_line(self) -> str:
         with self.lock:

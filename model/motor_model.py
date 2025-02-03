@@ -22,24 +22,35 @@ class MotorModel(QObject):
         if not self.serial_handler.ser or not self.serial_handler.ser.is_open:
             return "<NAK>Serial port not open<ETX>"
         try:
-            # Convert the command to hexadecimal
+            # Convert the command to hexadecimal.
             hex_command = text_to_hex(text_command)
-            # For example, the protocol uses:
-            #   STX (0x02), address (0x30), command, ETX (0x03)
+            # Build the full command (using protocol markers).
             full_command = f"02 30 {hex_command} 03"
-            command_bytes = bytes.fromhex(''.join(full_command.split()))
+            # Remove spaces to get a continuous hex string.
+            hex_string = full_command.replace(" ", "")
+            # Log the commands for debugging.
+            print(f"Sending command: {text_command}")
+            print(f"Hex conversion: {hex_command}")
+            print(f"Full command string: {full_command} -> {hex_string}")
+
+            # Convert the hex string to bytes.
+            command_bytes = bytes.fromhex(hex_string)
+            print(f"Command bytes: {command_bytes}")
+
+            # Write the bytes to the serial port.
             self.serial_handler.write_bytes(command_bytes)
+
+            # Read the response.
             response = self.serial_handler.read_line()
-            # Replace control characters for readability
             response_repr = (response
                              .replace('\x02', '<STX>')
                              .replace('\x06', '<ACK>')
                              .replace('\x03', '<ETX>')
                              .replace('\x15', '<NAK>'))
-            logger.info(f"Motor command '{text_command}' response: {response_repr}")
+            print(f"Response: {response_repr}")
             return response_repr
         except Exception as e:
-            logger.error(f"Error in send_command: {e}")
+            print(f"Exception in send_command({text_command}): {e}")
             return f"<NAK>Error: {e}<ETX>"
 
     def close(self):
