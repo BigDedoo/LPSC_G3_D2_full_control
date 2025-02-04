@@ -37,22 +37,26 @@ class AcqSequenceWorker(QObject):
                 {"label": "X", "initial": "X0+", "drive": "X-400", "csv": "acquired_data_X.csv"},
                 {"label": "Y", "initial": "Y0+", "drive": "Y-400", "csv": "acquired_data_Y.csv"}
             ]
-            # Continue looping until stopped.
+
+            self.motor_model.send_command(motor_profiles[0]['initial'])
+            time.sleep(3)
+            self.motor_model.send_command(motor_profiles[1]['initial'])
+            time.sleep(5)
+
             while self._running:
                 for profile in motor_profiles:
                     if not self._running:
                         break
 
                     motor_label = profile["label"]
-                    initial_cmd = profile["initial"]
                     drive_cmd = profile["drive"]
                     csv_filename = profile["csv"]
 
                     print(f"[AcqSequenceWorker] Starting sequence for {motor_label} motor.")
 
                     # Step 1: Send the initial command to the motor.
-                    self.motor_model.send_command(initial_cmd)
-                    time.sleep(5)  # Wait 10 seconds
+                    #self.motor_model.send_command(initial_cmd)
+                    #time.sleep(5)  # Wait 10 seconds
 
                     # Step 2: Send "A" to the acquisition card.
                     self.acq_model.send_serial_data("A")

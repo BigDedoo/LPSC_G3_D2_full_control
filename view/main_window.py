@@ -5,7 +5,11 @@ from PyQt5.QtWidgets import (
     QPushButton, QTextEdit, QTabWidget, QGridLayout
 )
 from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtWebEngineWidgets import QWebEngineView  # New import for Plotly graphs
 import logging
+import pandas as pd
+import plotly.graph_objs as go
+import plotly.offline as pyo
 
 logger = logging.getLogger(__name__)
 
@@ -23,23 +27,23 @@ class MainWindow(QWidget):
 
         self.tab_widget = QTabWidget(self)
 
-        # Tab 1: Commands
+        # Tab 1: Commands remains the same.
         self.command_tab = QWidget()
         self.setup_command_tab()
 
-        # Tab 2: Acquisition Data (live view)
-        self.data_tab = QWidget()
-        self.setup_data_tab()
+        # Tab 2: Graph (formerly Acquisition Data)
+        self.graph_tab = QWidget()
+        self.setup_graph_tab()
 
         self.tab_widget.addTab(self.command_tab, "Commands")
-        self.tab_widget.addTab(self.data_tab, "Acquisition Data")
+        self.tab_widget.addTab(self.graph_tab, "Graph")
 
         main_layout = QVBoxLayout()
         main_layout.addWidget(self.tab_widget)
         self.setLayout(main_layout)
 
     def setup_command_tab(self):
-        # Create a horizontal layout for two columns: left (controls & outputs) and right (motor parameters)
+        # (Existing code for the commands tab remains unchanged.)
         main_layout = QHBoxLayout()
 
         # ---------------------- Left Column ----------------------
@@ -86,10 +90,10 @@ class MainWindow(QWidget):
         left_layout.addLayout(motor_layout)
         left_layout.addLayout(acq_layout)
         left_layout.addLayout(seq_layout)
-        left_layout.addLayout(stop_layout)   # <-- Added the new stop buttons here
+        left_layout.addLayout(stop_layout)
         left_layout.addWidget(QLabel("Motor Responses:"))
         left_layout.addWidget(self.motor_output)
-        left_layout.addWidget(QLabel("Acquisition Data:"))
+        left_layout.addWidget(QLabel("Acq Data:"))
         left_layout.addWidget(self.acq_output)
 
         # ---------------------- Right Column ----------------------
@@ -132,13 +136,73 @@ class MainWindow(QWidget):
 
         self.command_tab.setLayout(main_layout)
 
-    def setup_data_tab(self):
+    def setup_graph_tab(self):
+        """
+        Set up the Graph tab to display two Plotly graphs (one for acquired_data_X.csv and one for acquired_data_Y.csv).
+        """
         layout = QVBoxLayout()
-        self.data_display = QTextEdit()
-        self.data_display.setReadOnly(True)
-        layout.addWidget(QLabel("Live Acquisition Data:"))
-        layout.addWidget(self.data_display)
-        self.data_tab.setLayout(layout)
+
+        # Create two QWebEngineView widgets for the graphs.
+        self.graph_view_x = QWebEngineView()
+        self.graph_view_y = QWebEngineView()
+
+        # Optionally, add labels above each graph.
+        layout.addWidget(QLabel("Graph for Acquired Data X"))
+        layout.addWidget(self.graph_view_x, stretch=1)
+        layout.addWidget(QLabel("Graph for Acquired Data Y"))
+        layout.addWidget(self.graph_view_y, stretch=1)
+
+        self.graph_tab.setLayout(layout)
+
+        # Plot the graphs immediately upon creation.
+        self.plot_graphs()
+
+    def plot_graphs(self):
+        """
+        Read the CSV files and create Plotly graphs using only the first column of each file.
+        """
+        try:
+            # Read the CSV files assuming they have no header.
+            df_x = pd.read_csv("acquired_data_X.csv", header=None)
+            df_y = pd.read_csv("acquired_data_Y.csv", header=None)
+
+            # Use only the first column (index 0) for plotting.
+            # Create a line plot for each dataset.
+            fig_x = go.Figure(data=go.Scatter(
+                x=df_x.index,
+                y=df_x.iloc[:, 0],  # Only the first column
+                mode='lines',
+                name='X Motor Data'
+            ))
+            fig_x.update_layout(
+                title="Acquired Data for X Motor",
+                xaxis_title="Index",
+                yaxis_title="Value"
+            )
+
+            fig_y = go.Figure(data=go.Scatter(
+                x=df_y.index,
+                y=df_y.iloc[:, 0],  # Only the first column
+                mode='lines',
+                name='Y Motor Data'
+            ))
+            fig_y.update_layout(
+                title="Acquired Data for Y Motor",
+                xaxis_title="Index",
+                yaxis_title="Value"
+            )
+
+            # Generate HTML div strings for the figures.
+            # Include Plotly JS for the first graph; the second can assume the first has loaded it.
+            html_x = pyo.plot(fig_x, include_plotlyjs='cdn', output_type='div')
+            html_y = pyo.plot(fig_y, include_plotlyjs='cdn', output_type='div')
+
+            # Set the generated HTML to the QWebEngineView widgets.
+            self.graph_view_x.setHtml(html_x)
+            self.graph_view_y.setHtml(html_y)
+
+        except Exception as e:
+            logger.error(f"Error plotting graphs: {e}")
 
     def connect_signals(self):
         # Button click connections
@@ -147,13 +211,13 @@ class MainWindow(QWidget):
         self.start_seq_button.clicked.connect(self.controller.startAcqSequence)
         self.stop_seq_button.clicked.connect(self.controller.stopAcqSequence)
         self.poll_motor_button.clicked.connect(self.on_poll_motor)
-        self.stop_x_button.clicked.connect(self.on_stop_x)  # NEW connection for Stop X
-        self.stop_y_button.clicked.connect(self.on_stop_y)  # NEW connection for Stop Y
+        self.stop_x_button.clicked.connect(self.on_stop_x)
+        self.stop_y_button.clicked.connect(self.on_stop_y)
 
         # Controller-to-view signal connections
         self.controller.motorResponseReceived.connect(self.update_motor_output)
         self.controller.acqDataReceived.connect(self.update_acq_output)
-        self.controller.acqDataReceived.connect(self.update_data_display)
+        # Removed connection to update_data_display
         self.controller.acqSequenceFinished.connect(self.on_sequence_finished)
         self.controller.motorParametersUpdated.connect(self.update_motor_parameters)
 
@@ -188,10 +252,6 @@ class MainWindow(QWidget):
     @pyqtSlot(str)
     def update_acq_output(self, data: str):
         self.acq_output.append(f"Acq Data: {data}")
-
-    @pyqtSlot(str)
-    def update_data_display(self, data: str):
-        self.data_display.append(data)
 
     @pyqtSlot(dict)
     def update_motor_parameters(self, parameters: dict):
