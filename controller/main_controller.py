@@ -13,7 +13,8 @@ class MainController(QObject):
     acqDataReceived = pyqtSignal(str)
     motorResponseReceived = pyqtSignal(str)
     acqSequenceFinished = pyqtSignal()
-    motorParametersUpdated = pyqtSignal(dict)  # This signal updates motor parameters in the view.
+    motorParametersUpdated = pyqtSignal(dict)
+    errorOccurred = pyqtSignal(str)  # Centralized error signal.
 
     def __init__(self):
         super().__init__()
@@ -29,17 +30,20 @@ class MainController(QObject):
         self.motor_poll_thread = None
         self.motor_poller = None
 
-        # If you have an AcqReadWorker for continuous data reading, set it up here.
-        # (Not shown in this snippet to focus on the changes.)
-
     def sendMotorCommand(self, command: str):
         """Send a command to the motor and emit the response."""
-        response = self.motor_model.send_command(command)
-        self.motorResponseReceived.emit(response)
+        try:
+            response = self.motor_model.send_command(command)
+            self.motorResponseReceived.emit(response)
+        except Exception as e:
+            self.errorOccurred.emit(f"Error sending motor command: {e}")
 
     def sendAcqCommand(self, command: str):
         """Send a command to the acquisition card."""
-        self.acq_model.send_serial_data(command)
+        try:
+            self.acq_model.send_serial_data(command)
+        except Exception as e:
+            self.errorOccurred.emit(f"Error sending acq command: {e}")
 
     def startAcqSequence(self):
         """
@@ -54,6 +58,8 @@ class MainController(QObject):
         self.acq_seq_worker.moveToThread(self.acq_seq_thread)
         self.acq_seq_thread.started.connect(self.acq_seq_worker.run)
         self.acq_seq_worker.finished.connect(self.acqSequenceFinished.emit)
+        # Connect the worker's error signal to a handler.
+        self.acq_seq_worker.errorOccurred.connect(self.errorOccurred.emit)
         self.acq_seq_worker.finished.connect(self.acq_seq_thread.quit)
         self.acq_seq_worker.finished.connect(self.acq_seq_worker.deleteLater)
         self.acq_seq_thread.finished.connect(self.acq_seq_thread.deleteLater)
@@ -70,15 +76,13 @@ class MainController(QObject):
     def runMotorParameterPoller(self):
         """
         Start the motor parameter poller in its own thread to retrieve motor parameters
-        once (or you can modify the poller to run continuously if desired).
+        once (or modify the poller to run continuously if desired).
         """
         self.motor_poll_thread = QThread()
         self.motor_poller = MotorParameterPollerSingle(self.motor_model)
         self.motor_poller.moveToThread(self.motor_poll_thread)
         self.motor_poll_thread.started.connect(self.motor_poller.run)
-        # When parameters are updated, forward the dictionary to the UI.
         self.motor_poller.motorParametersUpdated.connect(self.motorParametersUpdated.emit)
-        # Quit the thread after polling is complete.
         self.motor_poller.motorParametersUpdated.connect(self.motor_poll_thread.quit)
         self.motor_poll_thread.start()
 

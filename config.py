@@ -6,4 +6,5 @@ ACQ_COM_PORT = 'COM4'
 BAUD_RATE = 9600
 SERIAL_TIMEOUT = 1  # in seconds
 
-CSV_OUTPUT_PATH = "acquired_data.csv"
+# New: Maximum polling attempts for acquiring an "F" response.
+MAX_POLL_ATTEMPTS = 100  # 100 * 100ms ≈ 10 seconds

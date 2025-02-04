@@ -1,5 +1,3 @@
-# model/serial_handler.py
-
 import serial
 import threading
 import time
