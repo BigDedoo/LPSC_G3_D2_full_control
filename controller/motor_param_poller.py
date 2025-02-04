@@ -34,8 +34,8 @@ class MotorParameterPoller(QObject):
 
 class MotorParameterPollerSingle(QObject):
     """
-    Worker that polls motor parameters one time.
-    Polls 49 parameters for both the X and Y motors.
+    Worker that polls motor parameters one time
+    (1..49) but emits each pair as soon as it’s available.
     """
     motorParametersUpdated = pyqtSignal(dict)
 
@@ -44,8 +44,27 @@ class MotorParameterPollerSingle(QObject):
         self.motor_model = motor_model
 
     def run(self):
-        responses = {}
-        for i in range(1, 50):  # 1 through 49
-            responses[f"X{i}"] = self.motor_model.send_command(f"XP{i:02d}R")
-            responses[f"Y{i}"] = self.motor_model.send_command(f"YP{i:02d}R")
-        self.motorParametersUpdated.emit(responses)
+        """
+        Poll each parameter, Xn and Yn, and emit partial updates on each iteration.
+        """
+        # If you still want a final "all at once" dictionary,
+        # create an accumulator as well:
+        all_responses = {}
+
+        for i in range(1, 50):
+            # Send the commands
+            x_resp = self.motor_model.send_command(f"XP{i:02d}R")
+            y_resp = self.motor_model.send_command(f"YP{i:02d}R")
+
+            # Update an "all responses" dict (optional)
+            all_responses[f"X{i}"] = x_resp
+            all_responses[f"Y{i}"] = y_resp
+
+            # Emit just the new results for the X_i and Y_i parameters
+            self.motorParametersUpdated.emit({
+                f"X{i}": x_resp,
+                f"Y{i}": y_resp
+            })
+
+        # Optionally emit the complete dictionary at the end if you prefer:
+        # self.motorParametersUpdated.emit(all_responses)
