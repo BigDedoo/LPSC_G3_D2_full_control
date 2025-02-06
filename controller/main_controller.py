@@ -2,6 +2,7 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal
 import logging
 from controller.acq_sequence_worker import AcqSequenceWorker
 from controller.motor_param_poller import MotorParameterPollerSingle
+from controller.program_uploader import ProgramUploader
 from model.motor_model import MotorModel
 from model.acq_model import AcqModel
 from config import MOTOR_COM_PORT, ACQ_COM_PORT, BAUD_RATE, SERIAL_TIMEOUT
@@ -85,6 +86,22 @@ class MainController(QObject):
         self.motor_poller.motorParametersUpdated.connect(self.motorParametersUpdated.emit)
         self.motor_poller.motorParametersUpdated.connect(self.motor_poll_thread.quit)
         self.motor_poll_thread.start()
+
+    def startProgramUpload(self, file_path: str, program_name: str):
+        """
+        Launch the program uploader in a separate thread.
+        """
+        self.prog_upload_thread = QThread()
+        self.prog_uploader = ProgramUploader(self.motor_model, file_path, program_name)
+        self.prog_uploader.moveToThread(self.prog_upload_thread)
+        self.prog_upload_thread.started.connect(self.prog_uploader.upload)
+        # Connect progress and error signals to appropriate handlers
+        self.prog_uploader.progressUpdated.connect(lambda msg: print(f"[Uploader] {msg}"))
+        self.prog_uploader.errorOccurred.connect(self.errorOccurred.emit)
+        self.prog_uploader.finished.connect(self.prog_upload_thread.quit)
+        self.prog_uploader.finished.connect(self.prog_uploader.deleteLater)
+        self.prog_upload_thread.finished.connect(self.prog_upload_thread.deleteLater)
+        self.prog_upload_thread.start()
 
     def cleanup(self):
         """Clean up and stop all threads and close serial ports."""

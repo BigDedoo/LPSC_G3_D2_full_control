@@ -1,17 +1,18 @@
-# ----- view/main_window.py -----
+# view/main_window.py
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTextEdit, QTabWidget, QGridLayout
+    QPushButton, QTextEdit, QTabWidget, QGridLayout, QFileDialog, QGroupBox
 )
 from PyQt5.QtCore import pyqtSlot
-from PyQt5.QtWebEngineWidgets import QWebEngineView  # New import for Plotly graphs
+from PyQt5.QtWebEngineWidgets import QWebEngineView  # For Plotly graphs
 import logging
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.offline as pyo
 
 logger = logging.getLogger(__name__)
+
 
 class MainWindow(QWidget):
     def __init__(self, controller):
@@ -43,13 +44,13 @@ class MainWindow(QWidget):
         self.setLayout(main_layout)
 
     def setup_command_tab(self):
-        # (Existing code for the commands tab remains unchanged.)
+        # Create the overall layout for the Commands tab.
         main_layout = QHBoxLayout()
 
         # ---------------------- Left Column ----------------------
         left_layout = QVBoxLayout()
 
-        # Motor command controls
+        # --- Motor command controls ---
         motor_layout = QHBoxLayout()
         self.motor_command_input = QLineEdit()
         self.motor_send_button = QPushButton("Send Motor Command")
@@ -57,7 +58,7 @@ class MainWindow(QWidget):
         motor_layout.addWidget(self.motor_command_input)
         motor_layout.addWidget(self.motor_send_button)
 
-        # Acquisition command controls
+        # --- Acquisition command controls ---
         acq_layout = QHBoxLayout()
         self.acq_command_input = QLineEdit()
         self.acq_send_button = QPushButton("Send Acq Command")
@@ -65,26 +66,37 @@ class MainWindow(QWidget):
         acq_layout.addWidget(self.acq_command_input)
         acq_layout.addWidget(self.acq_send_button)
 
-        # Sequence control buttons
+        # --- Sequence control buttons ---
         seq_layout = QHBoxLayout()
         self.start_seq_button = QPushButton("Start Acq Sequence")
         self.stop_seq_button = QPushButton("Stop Acq Sequence")
         seq_layout.addWidget(self.start_seq_button)
         seq_layout.addWidget(self.stop_seq_button)
 
-        # NEW: Stop X and Stop Y buttons
+        # --- Stop X and Stop Y buttons ---
         stop_layout = QHBoxLayout()
         self.stop_x_button = QPushButton("Stop X")
         self.stop_y_button = QPushButton("Stop Y")
         stop_layout.addWidget(self.stop_x_button)
         stop_layout.addWidget(self.stop_y_button)
 
-        # Motor Responses output
+        # --- Motor Responses output ---
         self.motor_output = QTextEdit()
         self.motor_output.setReadOnly(True)
-        # Acquisition Data output
+        # --- Acquisition Data output ---
         self.acq_output = QTextEdit()
         self.acq_output.setReadOnly(True)
+
+        # --- Program Upload group ---
+        prog_upload_group = QGroupBox("Program Upload")
+        prog_upload_layout = QHBoxLayout()
+        self.prog_name_input = QLineEdit()
+        self.prog_name_input.setPlaceholderText("Program Name (8 chars)")
+        self.upload_prog_button = QPushButton("Upload Program")
+        prog_upload_layout.addWidget(QLabel("Program Name:"))
+        prog_upload_layout.addWidget(self.prog_name_input)
+        prog_upload_layout.addWidget(self.upload_prog_button)
+        prog_upload_group.setLayout(prog_upload_layout)
 
         # Assemble left column layout
         left_layout.addLayout(motor_layout)
@@ -95,11 +107,12 @@ class MainWindow(QWidget):
         left_layout.addWidget(self.motor_output)
         left_layout.addWidget(QLabel("Acq Data:"))
         left_layout.addWidget(self.acq_output)
+        left_layout.addWidget(prog_upload_group)
 
         # ---------------------- Right Column ----------------------
         right_layout = QVBoxLayout()
 
-        # Create the "Poll Motor Parameters" button and place it above the parameters display.
+        # Create the "Poll Motor Parameters" button
         self.poll_motor_button = QPushButton("Poll Motor Parameters")
 
         # Create a grid layout for motor parameters display.
@@ -166,11 +179,10 @@ class MainWindow(QWidget):
             df_x = pd.read_csv("acquired_data_X.csv", header=None)
             df_y = pd.read_csv("acquired_data_Y.csv", header=None)
 
-            # Use only the first column (index 0) for plotting.
-            # Create a line plot for each dataset.
+            # Create a line plot for each dataset using the first column.
             fig_x = go.Figure(data=go.Scatter(
                 x=df_x.index,
-                y=df_x.iloc[:, 0],  # Only the first column
+                y=df_x.iloc[:, 0],
                 mode='lines',
                 name='X Motor Data'
             ))
@@ -182,7 +194,7 @@ class MainWindow(QWidget):
 
             fig_y = go.Figure(data=go.Scatter(
                 x=df_y.index,
-                y=df_y.iloc[:, 0],  # Only the first column
+                y=df_y.iloc[:, 0],
                 mode='lines',
                 name='Y Motor Data'
             ))
@@ -193,7 +205,6 @@ class MainWindow(QWidget):
             )
 
             # Generate HTML div strings for the figures.
-            # Include Plotly JS for the first graph; the second can assume the first has loaded it.
             html_x = pyo.plot(fig_x, include_plotlyjs='cdn', output_type='div')
             html_y = pyo.plot(fig_y, include_plotlyjs='cdn', output_type='div')
 
@@ -205,7 +216,7 @@ class MainWindow(QWidget):
             logger.error(f"Error plotting graphs: {e}")
 
     def connect_signals(self):
-        # Button click connections
+        # Button click connections for motor/acq commands and sequences.
         self.motor_send_button.clicked.connect(self.on_motor_send)
         self.acq_send_button.clicked.connect(self.on_acq_send)
         self.start_seq_button.clicked.connect(self.controller.startAcqSequence)
@@ -214,10 +225,12 @@ class MainWindow(QWidget):
         self.stop_x_button.clicked.connect(self.on_stop_x)
         self.stop_y_button.clicked.connect(self.on_stop_y)
 
-        # Controller-to-view signal connections
+        # Connect the program upload button.
+        self.upload_prog_button.clicked.connect(self.on_program_upload)
+
+        # Controller-to-view signal connections.
         self.controller.motorResponseReceived.connect(self.update_motor_output)
         self.controller.acqDataReceived.connect(self.update_acq_output)
-        # Removed connection to update_data_display
         self.controller.acqSequenceFinished.connect(self.on_sequence_finished)
         self.controller.motorParametersUpdated.connect(self.update_motor_parameters)
 
@@ -262,6 +275,25 @@ class MainWindow(QWidget):
     @pyqtSlot()
     def on_sequence_finished(self):
         self.acq_output.append("Acquisition Sequence Finished.")
+
+    @pyqtSlot()
+    def on_program_upload(self):
+        """
+        Open a file dialog to select a .txt file and initiate the program upload.
+        The program name is read from the QLineEdit.
+        """
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Program File", "", "Text Files (*.txt)"
+        )
+        if file_path:
+            prog_name = self.prog_name_input.text().strip()
+            if len(prog_name) == 0:
+                self.acq_output.append("Please enter a program name (8 characters).")
+                return
+            if len(prog_name) > 8:
+                prog_name = prog_name[:8]
+            self.acq_output.append(f"Uploading program '{prog_name}' from {file_path}...")
+            self.controller.startProgramUpload(file_path, prog_name)
 
     def closeEvent(self, event):
         self.controller.cleanup()
