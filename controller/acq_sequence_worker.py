@@ -1,24 +1,36 @@
-import csv
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
-import time
-from config import MAX_POLL_ATTEMPTS
+# controller/acq_sequence_worker.py
 
+import csv
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+from utils.state_machine_builder import build_acq_state_machine
+from config import MAX_POLL_ATTEMPTS
 
 class AcqSequenceWorker(QObject):
     """
-    Revised Acquisition Sequence Worker using a state‐machine style with QTimer.
-    This worker sends the initial motor commands, then for each motor profile:
-      1. Sends "A" to the acq card.
-      2. Sends the motor’s drive command.
-      3. Polls for an "F" response (with a maximum number of attempts to avoid hangs).
-      4. When "F" is received, sends "D" to the acq card.
-      5. Collects data until the termination string is received.
-      6. Saves the collected data to a CSV file.
-
-    Each step is scheduled using QTimer.singleShot so that no blocking sleeps occur.
+    Acquisition Sequence Worker implemented as a state machine.
+    It performs the following steps for each motor profile:
+      1. Sends initial motor commands (motor X then motor Y).
+      2. For each motor profile:
+         - Sends "A" to the acquisition card and the motor’s drive command.
+         - Polls for an "F" response (with a maximum number of attempts).
+         - When "F" is received, sends "D" to the acquisition card.
+         - Collects data until a termination string is received.
+         - Saves the data to a CSV file.
     """
     finished = pyqtSignal()
     errorOccurred = pyqtSignal(str)
+
+    # Signals used for state transitions.
+    initDone = pyqtSignal()
+    motorYDone = pyqtSignal()
+    startSequenceDone = pyqtSignal()
+    profileReady = pyqtSignal()
+    aCommandSent = pyqtSignal()
+    pollSuccess = pyqtSignal()
+    pollTimeout = pyqtSignal()
+    dCommandSent = pyqtSignal()
+    dataCollected = pyqtSignal()
+    dataSaved = pyqtSignal()
 
     def __init__(self, motor_model, acq_model, parent=None):
         super().__init__(parent)
@@ -34,160 +46,141 @@ class AcqSequenceWorker(QObject):
         self.current_profile_index = 0
         self.current_profile = None
         self.collected_data = []
-
-        # For polling “F” responses.
         self.polling_attempts = 0
         self.max_poll_attempts = MAX_POLL_ATTEMPTS
 
-    def run(self):
-        """
-        Start the sequence by sending the initial commands.
-        """
-        if not self._running:
-            self.finished.emit()
-            return
+        # Use the state machine builder helper.
+        self.machine = build_acq_state_machine(self)
+        self.machine.finished.connect(self.finished.emit)
 
+    def start(self):
+        """Start the acquisition sequence state machine."""
+        self.machine.start()
+
+    # --- State handler methods ---
+    def on_state_init(self):
+        if not self._running:
+            self.machine.stop()
+            return
         try:
-            print("[AcqSequenceWorker] Sending initial command for motor X.")
+            print("[AcqSequenceWorker] State Init: Sending initial command for motor X.")
             self.motor_model.send_command(self.motor_profiles[0]['initial'])
-            QTimer.singleShot(3000, self.sendSecondMotorInitial)
+            QTimer.singleShot(3000, self.initDone.emit)
         except Exception as e:
-            self.errorOccurred.emit(f"Error in run(): {e}")
-            self.finished.emit()
+            self.errorOccurred.emit(f"Error in state_init: {e}")
+            self.machine.stop()
 
-    def sendSecondMotorInitial(self):
-        """
-        Send the initial command for motor Y after a delay.
-        """
+    def on_state_sendMotorY(self):
         if not self._running:
-            self.finished.emit()
+            self.machine.stop()
             return
         try:
-            print("[AcqSequenceWorker] Sending initial command for motor Y.")
+            print("[AcqSequenceWorker] State SendMotorY: Sending initial command for motor Y.")
             self.motor_model.send_command(self.motor_profiles[1]['initial'])
-            QTimer.singleShot(5000, self.startMotorSequence)
+            QTimer.singleShot(5000, self.motorYDone.emit)
         except Exception as e:
-            self.errorOccurred.emit(f"Error in sendSecondMotorInitial(): {e}")
-            self.finished.emit()
+            self.errorOccurred.emit(f"Error in state_sendMotorY: {e}")
+            self.machine.stop()
 
-    def startMotorSequence(self):
-        """
-        Begin processing the motor profiles.
-        """
+    def on_state_startSequence(self):
         if not self._running:
-            self.finished.emit()
+            self.machine.stop()
             return
+        print("[AcqSequenceWorker] State StartSequence: Initializing sequence.")
         self.current_profile_index = 0
-        self.startMotorProfile()
+        QTimer.singleShot(100, self.startSequenceDone.emit)
 
-    def startMotorProfile(self):
-        """
-        Begin the sequence for the current motor profile.
-        """
+    def on_state_processProfile(self):
         if not self._running:
-            self.finished.emit()
+            self.machine.stop()
             return
-
         if self.current_profile_index >= len(self.motor_profiles):
-            # Restart sequence if continuous operation is desired.
-            self.current_profile_index = 0
-            QTimer.singleShot(1000, self.startMotorProfile)
-            return
-
+            self.current_profile_index = 0  # Loop continuously.
         self.current_profile = self.motor_profiles[self.current_profile_index]
-        print(f"[AcqSequenceWorker] Starting sequence for {self.current_profile['label']} motor.")
-        try:
-            # Step 2: Send "A" command to the acquisition card.
-            self.acq_model.send_serial_data("A")
-            # Step 3: Send the motor’s drive command.
-            self.motor_model.send_command(self.current_profile['drive'])
-        except Exception as e:
-            self.errorOccurred.emit(f"Error sending commands for motor {self.current_profile['label']}: {e}")
-            self.finished.emit()
-            return
+        print(f"[AcqSequenceWorker] State ProcessProfile: Processing {self.current_profile['label']} motor.")
+        QTimer.singleShot(100, self.profileReady.emit)
 
-        # Step 4: Start polling for the "F" response.
-        self.polling_attempts = 0
-        QTimer.singleShot(100, self.pollForResponse)
-
-    def pollForResponse(self):
-        """
-        Poll the acquisition card by sending "A" repeatedly until "F" is received.
-        Uses QTimer.singleShot to schedule each polling attempt.
-        """
+    def on_state_sendACommand(self):
         if not self._running:
-            self.finished.emit()
+            self.machine.stop()
             return
+        try:
+            print(f"[AcqSequenceWorker] State SendACommand: Sending 'A' and drive command for {self.current_profile['label']} motor.")
+            self.acq_model.send_serial_data("A")
+            self.motor_model.send_command(self.current_profile['drive'])
+            QTimer.singleShot(100, self.aCommandSent.emit)
+        except Exception as e:
+            self.errorOccurred.emit(f"Error in state_sendACommand: {e}")
+            self.machine.stop()
 
+    def on_state_pollForResponse(self):
+        if not self._running:
+            self.machine.stop()
+            return
         try:
             response = self.acq_model.read_serial_data()
-            print(f"[AcqSequenceWorker] Polling ({self.current_profile['label']}): received '{response}'")
+            print(f"[AcqSequenceWorker] State PollForResponse ({self.current_profile['label']}): received '{response}'")
             if response == "F":
-                # Step 5: Once "F" is received, send the "D" command.
-                self.acq_model.send_serial_data("D")
-                print(f"[AcqSequenceWorker] Sent 'D' command for {self.current_profile['label']} motor.")
-                # Step 6: Begin collecting data.
-                self.collected_data = []
-                QTimer.singleShot(100, self.collectData)
+                self.polling_attempts = 0
+                self.pollSuccess.emit()
             else:
                 self.polling_attempts += 1
                 if self.polling_attempts > self.max_poll_attempts:
-                    self.errorOccurred.emit(
-                        f"Timeout polling for 'F' response on {self.current_profile['label']} motor."
-                    )
-                    self.stop()
-                    self.finished.emit()
-                    return
-                QTimer.singleShot(100, self.pollForResponse)
+                    self.errorOccurred.emit(f"Timeout polling for 'F' on {self.current_profile['label']} motor.")
+                    self.pollTimeout.emit()
+                else:
+                    QTimer.singleShot(100, self.on_state_pollForResponse)
         except Exception as e:
-            self.errorOccurred.emit(f"Error in pollForResponse(): {e}")
-            self.finished.emit()
+            self.errorOccurred.emit(f"Error in state_pollForResponse: {e}")
+            self.machine.stop()
 
-    def collectData(self):
-        """
-        Collect data lines from the acquisition card until the termination string is received.
-        """
+    def on_state_sendDCommand(self):
         if not self._running:
-            self.finished.emit()
+            self.machine.stop()
             return
+        try:
+            print(f"[AcqSequenceWorker] State SendDCommand: Sending 'D' for {self.current_profile['label']} motor.")
+            self.acq_model.send_serial_data("D")
+            QTimer.singleShot(100, self.dCommandSent.emit)
+        except Exception as e:
+            self.errorOccurred.emit(f"Error in state_sendDCommand: {e}")
+            self.machine.stop()
 
+    def on_state_collectData(self):
+        if not self._running:
+            self.machine.stop()
+            return
         try:
             data_line = self.acq_model.read_serial_data()
-            print(f"[AcqSequenceWorker] Data line ({self.current_profile['label']}): {data_line}")
+            print(f"[AcqSequenceWorker] State CollectData ({self.current_profile['label']}): {data_line}")
             if data_line == "00000000,00000000":
-                # Termination string received; proceed to save data.
-                self.saveData()
+                self.dataCollected.emit()
             else:
                 self.collected_data.append(data_line)
-                QTimer.singleShot(100, self.collectData)
+                QTimer.singleShot(100, self.on_state_collectData)
         except Exception as e:
-            self.errorOccurred.emit(f"Error in collectData(): {e}")
-            self.finished.emit()
+            self.errorOccurred.emit(f"Error in state_collectData: {e}")
+            self.machine.stop()
 
-    def saveData(self):
-        """
-        Save the collected data into a CSV file.
-        """
+    def on_state_saveData(self):
         if not self._running:
-            self.finished.emit()
+            self.machine.stop()
             return
-
         try:
             with open(self.current_profile['csv'], 'w', newline='') as csv_file:
                 writer = csv.writer(csv_file)
                 for item in self.collected_data:
                     writer.writerow([item])
-            print(
-                f"[AcqSequenceWorker] Data saved to {self.current_profile['csv']} for {self.current_profile['label']} motor.")
+            print(f"[AcqSequenceWorker] State SaveData: Data saved to {self.current_profile['csv']} for {self.current_profile['label']} motor.")
+            self.current_profile_index += 1
+            self.collected_data = []  # Reset for the next profile.
+            QTimer.singleShot(1000, self.dataSaved.emit)
         except Exception as e:
-            self.errorOccurred.emit(f"Error in saveData(): {e}")
-        # Proceed to the next motor profile.
-        self.current_profile_index += 1
-        QTimer.singleShot(1000, self.startMotorProfile)
+            self.errorOccurred.emit(f"Error in state_saveData: {e}")
+            self.machine.stop()
 
     def stop(self):
-        """
-        Request a graceful shutdown of the worker.
-        """
+        """Request a graceful shutdown of the worker."""
         self._running = False
         print("[AcqSequenceWorker] Stop requested.")
+        self.machine.stop()

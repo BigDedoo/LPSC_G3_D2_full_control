@@ -4,7 +4,7 @@ from PyQt5.QtCore import QObject
 import time
 import logging
 from model.serial_handler import SerialHandler
-from utils.conversions import text_to_hex
+from utils.protocol_formatter import ProtocolFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +19,6 @@ class AcqModel(QObject):
         self.serial_handler.open()
 
     def read_serial_data(self) -> str:
-        """
-        Continuously attempt to read data, with a simple timeout.
-        """
         start_time = time.time()
         while True:
             if time.time() - start_time > self.serial_handler.timeout:
@@ -38,10 +35,7 @@ class AcqModel(QObject):
             logger.error("Acquisition serial port not open")
             return
         try:
-            hex_command = text_to_hex(command)
-            # Append carriage return (0D) if needed by the device protocol.
-            full_command = f"{hex_command}0D"
-            command_bytes = bytes.fromhex(full_command)
+            command_bytes = ProtocolFormatter.format_acq_command(command)
             self.serial_handler.write_bytes(command_bytes)
             logger.info(f"Sent acquisition command: {command}")
         except Exception as e:
