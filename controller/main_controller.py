@@ -1,3 +1,5 @@
+# controller/main_controller.py
+
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 import logging
 from controller.acq_sequence_worker import AcqSequenceWorker
@@ -31,6 +33,10 @@ class MainController(QObject):
         self.motor_poll_thread = None
         self.motor_poller = None
 
+        # Placeholders for the acquisition data poller thread/worker.
+        self.acq_data_poll_thread = None
+        self.acq_data_poll_worker = None
+
     def sendMotorCommand(self, command: str):
         """Send a command to the motor and emit the response."""
         try:
@@ -59,10 +65,10 @@ class MainController(QObject):
         self.acq_seq_worker.moveToThread(self.acq_seq_thread)
         self.acq_seq_thread.started.connect(self.acq_seq_worker.run)
         self.acq_seq_worker.finished.connect(self.acqSequenceFinished.emit)
-        # Connect the worker's error signal to a handler.
-        self.acq_seq_worker.errorOccurred.connect(self.errorOccurred.emit)
+        self.acq_seq_worker.finished.connect(lambda: setattr(self, 'acq_seq_worker', None))
         self.acq_seq_worker.finished.connect(self.acq_seq_thread.quit)
         self.acq_seq_worker.finished.connect(self.acq_seq_worker.deleteLater)
+        self.acq_seq_thread.finished.connect(lambda: setattr(self, 'acq_seq_thread', None))
         self.acq_seq_thread.finished.connect(self.acq_seq_thread.deleteLater)
         self.acq_seq_thread.start()
 
@@ -76,8 +82,7 @@ class MainController(QObject):
 
     def runMotorParameterPoller(self):
         """
-        Start the motor parameter poller in its own thread to retrieve motor parameters
-        once (or modify the poller to run continuously if desired).
+        Start the motor parameter poller in its own thread to retrieve motor parameters.
         """
         self.motor_poll_thread = QThread()
         self.motor_poller = MotorParameterPollerSingle(self.motor_model)
@@ -95,13 +100,31 @@ class MainController(QObject):
         self.prog_uploader = ProgramUploader(self.motor_model, file_path, program_name)
         self.prog_uploader.moveToThread(self.prog_upload_thread)
         self.prog_upload_thread.started.connect(self.prog_uploader.upload)
-        # Connect progress and error signals to appropriate handlers
         self.prog_uploader.progressUpdated.connect(lambda msg: print(f"[Uploader] {msg}"))
         self.prog_uploader.errorOccurred.connect(self.errorOccurred.emit)
         self.prog_uploader.finished.connect(self.prog_upload_thread.quit)
         self.prog_uploader.finished.connect(self.prog_uploader.deleteLater)
         self.prog_upload_thread.finished.connect(self.prog_upload_thread.deleteLater)
         self.prog_upload_thread.start()
+
+    def startAcqDataPoller(self):
+        """
+        Start the acquisition data poller in its own thread to poll the acq card and save data.
+        """
+        if self.acq_data_poll_thread and self.acq_data_poll_thread.isRunning():
+            return
+
+        from controller.acq_data_poller import AcqDataPoller
+        self.acq_data_poll_thread = QThread()
+        self.acq_data_poll_worker = AcqDataPoller(self.acq_model)
+        self.acq_data_poll_worker.moveToThread(self.acq_data_poll_thread)
+        self.acq_data_poll_thread.started.connect(self.acq_data_poll_worker.run)
+        self.acq_data_poll_worker.finished.connect(lambda: self.acqDataReceived.emit("Acquisition poll finished."))
+        self.acq_data_poll_worker.finished.connect(self.acq_data_poll_thread.quit)
+        self.acq_data_poll_worker.finished.connect(self.acq_data_poll_worker.deleteLater)
+        self.acq_data_poll_thread.finished.connect(lambda: setattr(self, 'acq_data_poll_thread', None))
+        self.acq_data_poll_thread.finished.connect(self.acq_data_poll_thread.deleteLater)
+        self.acq_data_poll_thread.start()
 
     def cleanup(self):
         """Clean up and stop all threads and close serial ports."""
@@ -113,5 +136,10 @@ class MainController(QObject):
         if self.motor_poll_thread:
             self.motor_poll_thread.quit()
             self.motor_poll_thread.wait()
+        if self.acq_data_poll_worker:
+            self.acq_data_poll_worker.stop()
+        if self.acq_data_poll_thread:
+            self.acq_data_poll_thread.quit()
+            self.acq_data_poll_thread.wait()
         self.motor_model.close()
         self.acq_model.close()

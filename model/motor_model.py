@@ -1,9 +1,11 @@
-# ----- model/motor_model.py -----
-from PyQt5.QtCore import QObject
+# model/motor_model.py
+
+from PyQt5.QtCore import QObject, QMutexLocker
 import logging
-import time  # <--- added for send_raw
+import time
 from model.serial_handler import SerialHandler
 from utils.conversions import text_to_hex
+from utils.serial_mutex import motor_mutex  # use motor-specific mutex
 
 logger = logging.getLogger(__name__)
 
@@ -21,26 +23,20 @@ class MotorModel(QObject):
     def send_command(self, text_command: str) -> str:
         if not self.serial_handler.ser or not self.serial_handler.ser.is_open:
             return "<NAK>Serial port not open<ETX>"
+        # Acquire the motor-specific mutex.
+        locker = QMutexLocker(motor_mutex)
         try:
             # Convert the command to hexadecimal.
             hex_command = text_to_hex(text_command)
             # Build the full command (using protocol markers).
             full_command = f"02 30 {hex_command} 03"
-            # Remove spaces to get a continuous hex string.
             hex_string = full_command.replace(" ", "")
-            # Log the commands for debugging.
             print(f"Sending command: {text_command}")
             print(f"Hex conversion: {hex_command}")
             print(f"Full command string: {full_command} -> {hex_string}")
-
-            # Convert the hex string to bytes.
             command_bytes = bytes.fromhex(hex_string)
             print(f"Command bytes: {command_bytes}")
-
-            # Write the bytes to the serial port.
             self.serial_handler.write_bytes(command_bytes)
-
-            # Read the response.
             response = self.serial_handler.read_line()
             response_repr = (response
                              .replace('\x02', '<STX>')
@@ -54,14 +50,10 @@ class MotorModel(QObject):
             return f"<NAK>Error: {e}<ETX>"
 
     def send_raw(self, command_bytes: bytes, expected_response_length: int = None, timeout=5) -> bytes:
-        """
-        Send a raw bytes command and optionally wait for a specific number of bytes in the response.
-        If expected_response_length is None, read a line (as in send_command).
-        """
+        locker = QMutexLocker(motor_mutex)
         self.serial_handler.write_bytes(command_bytes)
         print(command_bytes)
         if expected_response_length is None:
-            # Return the result of readline (converted to bytes)
             return self.serial_handler.read_line().encode()
         ser = self.serial_handler.ser
         start = time.time()

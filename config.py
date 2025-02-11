@@ -7,4 +7,4 @@ BAUD_RATE = 9600
 SERIAL_TIMEOUT = 1  # in seconds
 
 # New: Maximum polling attempts for acquiring an "F" response.
-MAX_POLL_ATTEMPTS = 100  # 100 * 100ms ≈ 10 seconds
+MAX_POLL_ATTEMPTS = 500  # 100 * 100ms ≈ 10 seconds

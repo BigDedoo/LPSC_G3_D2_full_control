@@ -8,11 +8,11 @@ from PyQt5.QtCore import pyqtSlot
 from PyQt5.QtWebEngineWidgets import QWebEngineView  # For Plotly graphs
 import logging
 import pandas as pd
+import numpy as np
 import plotly.graph_objs as go
 import plotly.offline as pyo
 
 logger = logging.getLogger(__name__)
-
 
 class MainWindow(QWidget):
     def __init__(self, controller):
@@ -24,7 +24,7 @@ class MainWindow(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("Modular Acquisition App")
-        self.resize(800, 600)
+        self.resize(1000, 700)
 
         self.tab_widget = QTabWidget(self)
 
@@ -32,12 +32,17 @@ class MainWindow(QWidget):
         self.command_tab = QWidget()
         self.setup_command_tab()
 
-        # Tab 2: Graph (formerly Acquisition Data)
+        # Tab 2: Graph (Acquired Data Graphs)
         self.graph_tab = QWidget()
         self.setup_graph_tab()
 
+        # Tab 3: Beam Shape (3D reconstruction from X & Y data)
+        self.beam_tab = QWidget()
+        self.setup_beam_tab()
+
         self.tab_widget.addTab(self.command_tab, "Commands")
-        self.tab_widget.addTab(self.graph_tab, "Graph")
+        self.tab_widget.addTab(self.graph_tab, "Graphs")
+        self.tab_widget.addTab(self.beam_tab, "Beam Shape")
 
         main_layout = QVBoxLayout()
         main_layout.addWidget(self.tab_widget)
@@ -73,6 +78,11 @@ class MainWindow(QWidget):
         seq_layout.addWidget(self.start_seq_button)
         seq_layout.addWidget(self.stop_seq_button)
 
+        # --- New: Poll Acq Data button ---
+        poll_acq_layout = QHBoxLayout()
+        self.poll_acq_button = QPushButton("Poll Acq Data")
+        poll_acq_layout.addWidget(self.poll_acq_button)
+
         # --- Stop X and Stop Y buttons ---
         stop_layout = QHBoxLayout()
         self.stop_x_button = QPushButton("Stop X")
@@ -102,6 +112,7 @@ class MainWindow(QWidget):
         left_layout.addLayout(motor_layout)
         left_layout.addLayout(acq_layout)
         left_layout.addLayout(seq_layout)
+        left_layout.addLayout(poll_acq_layout)  # Added Poll Acq Data button
         left_layout.addLayout(stop_layout)
         left_layout.addWidget(QLabel("Motor Responses:"))
         left_layout.addWidget(self.motor_output)
@@ -135,15 +146,12 @@ class MainWindow(QWidget):
             motor_param_grid.addWidget(label_x, i, 1)
             motor_param_grid.addWidget(label_y, i, 2)
 
-        # Wrap the grid layout in a widget so it can be added to the right column.
         motor_param_widget = QWidget()
         motor_param_widget.setLayout(motor_param_grid)
 
-        # Assemble right column: add the poll button and below it the motor parameters widget.
         right_layout.addWidget(self.poll_motor_button)
         right_layout.addWidget(motor_param_widget)
 
-        # ---------------------- Combine Left and Right Columns ----------------------
         main_layout.addLayout(left_layout, stretch=3)
         main_layout.addLayout(right_layout, stretch=2)
 
@@ -154,81 +162,107 @@ class MainWindow(QWidget):
         Set up the Graph tab to display two Plotly graphs (one for acquired_data_X.csv and one for acquired_data_Y.csv).
         """
         layout = QVBoxLayout()
-
-        # Create two QWebEngineView widgets for the graphs.
         self.graph_view_x = QWebEngineView()
         self.graph_view_y = QWebEngineView()
-
-        # Optionally, add labels above each graph.
         layout.addWidget(QLabel("Graph for Acquired Data X"))
         layout.addWidget(self.graph_view_x, stretch=1)
         layout.addWidget(QLabel("Graph for Acquired Data Y"))
         layout.addWidget(self.graph_view_y, stretch=1)
-
         self.graph_tab.setLayout(layout)
-
-        # Plot the graphs immediately upon creation.
         self.plot_graphs()
 
+    def setup_beam_tab(self):
+        """
+        Set up the Beam Shape tab to display a 3D surface plot of the beam.
+        """
+        layout = QVBoxLayout()
+        self.plot_beam_button = QPushButton("Plot Beam Shape")
+        layout.addWidget(self.plot_beam_button)
+        self.beam_view = QWebEngineView()
+        layout.addWidget(self.beam_view, stretch=1)
+        self.beam_tab.setLayout(layout)
+        self.plot_beam_button.clicked.connect(self.plot_beam_shape)
+
     def plot_graphs(self):
-        """
-        Read the CSV files and create Plotly graphs using only the first column of each file.
-        """
         try:
-            # Read the CSV files assuming they have no header.
+            from utils.conversions import hex_to_current
+            import numpy as np
             df_x = pd.read_csv("acquired_data_X.csv", header=None)
             df_y = pd.read_csv("acquired_data_Y.csv", header=None)
-
-            # Create a line plot for each dataset using the first column.
+            x_current = df_x[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
+            y_current = df_y[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
             fig_x = go.Figure(data=go.Scatter(
-                x=df_x.index,
-                y=df_x.iloc[:, 0],
+                x=np.arange(len(x_current)),
+                y=x_current,
                 mode='lines',
                 name='X Motor Data'
             ))
             fig_x.update_layout(
-                title="Acquired Data for X Motor",
+                title="Acquired Current Data for X Motor",
                 xaxis_title="Index",
-                yaxis_title="Value"
+                yaxis_title="Current (A)"
             )
-
             fig_y = go.Figure(data=go.Scatter(
-                x=df_y.index,
-                y=df_y.iloc[:, 0],
+                x=np.arange(len(y_current)),
+                y=y_current,
                 mode='lines',
                 name='Y Motor Data'
             ))
             fig_y.update_layout(
-                title="Acquired Data for Y Motor",
+                title="Acquired Current Data for Y Motor",
                 xaxis_title="Index",
-                yaxis_title="Value"
+                yaxis_title="Current (A)"
             )
-
-            # Generate HTML div strings for the figures.
             html_x = pyo.plot(fig_x, include_plotlyjs='cdn', output_type='div')
             html_y = pyo.plot(fig_y, include_plotlyjs='cdn', output_type='div')
-
-            # Set the generated HTML to the QWebEngineView widgets.
             self.graph_view_x.setHtml(html_x)
             self.graph_view_y.setHtml(html_y)
-
         except Exception as e:
             logger.error(f"Error plotting graphs: {e}")
 
+    @pyqtSlot()
+    def plot_beam_shape(self):
+        try:
+            from utils.conversions import hex_to_current
+            df_x = pd.read_csv("acquired_data_X.csv", header=None)
+            df_y = pd.read_csv("acquired_data_Y.csv", header=None)
+            x_profile = df_x[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
+            y_profile = df_y[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
+            step_size = 0.5
+            x_axis = np.arange(len(x_profile)) * step_size
+            y_axis = np.arange(len(y_profile)) * step_size
+            Z = np.outer(x_profile, y_profile)
+            heatmap = go.Heatmap(
+                z=Z,
+                x=x_axis,
+                y=y_axis,
+                colorscale='Viridis'
+            )
+            fig = go.Figure(data=[heatmap])
+            fig.update_layout(
+                title="Beam Current Heat Map",
+                xaxis_title="X Position (mm)",
+                yaxis_title="Y Position (mm)",
+                autosize=True,
+                width=800,
+                height=800,
+                margin=dict(l=65, r=50, b=65, t=90)
+            )
+            html_heatmap = pyo.plot(fig, include_plotlyjs='cdn', output_type='div')
+            self.beam_view.setHtml(html_heatmap)
+        except Exception as e:
+            logger.error(f"Error plotting beam shape: {e}")
+
     def connect_signals(self):
-        # Button click connections for motor/acq commands and sequences.
         self.motor_send_button.clicked.connect(self.on_motor_send)
         self.acq_send_button.clicked.connect(self.on_acq_send)
         self.start_seq_button.clicked.connect(self.controller.startAcqSequence)
         self.stop_seq_button.clicked.connect(self.controller.stopAcqSequence)
         self.poll_motor_button.clicked.connect(self.on_poll_motor)
+        self.poll_acq_button.clicked.connect(self.on_poll_acq)  # Connect new Poll Acq Data button
         self.stop_x_button.clicked.connect(self.on_stop_x)
         self.stop_y_button.clicked.connect(self.on_stop_y)
-
-        # Connect the program upload button.
         self.upload_prog_button.clicked.connect(self.on_program_upload)
-
-        # Controller-to-view signal connections.
         self.controller.motorResponseReceived.connect(self.update_motor_output)
         self.controller.acqDataReceived.connect(self.update_acq_output)
         self.controller.acqSequenceFinished.connect(self.on_sequence_finished)
@@ -248,14 +282,17 @@ class MainWindow(QWidget):
         """Trigger the on-demand motor parameter poll."""
         self.controller.runMotorParameterPoller()
 
+    def on_poll_acq(self):
+        """Trigger acquisition data polling and save the data to requested_data.csv."""
+        self.acq_output.append("Starting Acquisition Data Polling...")
+        self.controller.startAcqDataPoller()
+
     @pyqtSlot()
     def on_stop_x(self):
-        """Send the 'XS' command to stop motor X."""
         self.controller.sendMotorCommand("XS")
 
     @pyqtSlot()
     def on_stop_y(self):
-        """Send the 'YS' command to stop motor Y."""
         self.controller.sendMotorCommand("YS")
 
     @pyqtSlot(str)
@@ -278,10 +315,6 @@ class MainWindow(QWidget):
 
     @pyqtSlot()
     def on_program_upload(self):
-        """
-        Open a file dialog to select a .txt file and initiate the program upload.
-        The program name is read from the QLineEdit.
-        """
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Program File", "", "Text Files (*.txt)"
         )

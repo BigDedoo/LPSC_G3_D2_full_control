@@ -1,10 +1,11 @@
 # model/acq_model.py
 
-from PyQt5.QtCore import QObject
+from PyQt5.QtCore import QObject, QMutexLocker
 import time
 import logging
 from model.serial_handler import SerialHandler
 from utils.conversions import text_to_hex
+from utils.serial_mutex import acq_mutex  # use acquisition-specific mutex
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,6 @@ class AcqModel(QObject):
         self.serial_handler.open()
 
     def read_serial_data(self) -> str:
-        """
-        Continuously attempt to read data, with a simple timeout.
-        """
         start_time = time.time()
         while True:
             if time.time() - start_time > self.serial_handler.timeout:
@@ -34,13 +32,13 @@ class AcqModel(QObject):
             time.sleep(0.1)
 
     def send_serial_data(self, command: str):
+        locker = QMutexLocker(acq_mutex)
         if not self.serial_handler.ser or not self.serial_handler.ser.is_open:
             logger.error("Acquisition serial port not open")
             return
         try:
             hex_command = text_to_hex(command)
-            # Append carriage return (0D) if needed by the device protocol.
-            full_command = f"{hex_command}0D"
+            full_command = f"{hex_command}0D"  # Append carriage return if required.
             command_bytes = bytes.fromhex(full_command)
             self.serial_handler.write_bytes(command_bytes)
             logger.info(f"Sent acquisition command: {command}")
