@@ -187,7 +187,7 @@ class MainWindow(QWidget):
         try:
             from utils.conversions import hex_to_current
             import numpy as np
-            df_x = pd.read_csv("requested_data.csv", header=None)
+            df_x = pd.read_csv("acquired_data_X.csv", header=None)
             df_y = pd.read_csv("acquired_data_Y.csv", header=None)
             x_current = df_x[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
             y_current = df_y[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
@@ -222,16 +222,41 @@ class MainWindow(QWidget):
 
     @pyqtSlot()
     def plot_beam_shape(self):
+        """
+        Reconstruct the beam current distribution as a heat map from the acquired
+        data files. With each file now containing 2048 lines (one word per line),
+        we convert the hex values to current and then downsample the profiles to 128 points.
+        The outer product of these downsampled profiles is used to generate the 3D heat map.
+        """
         try:
             from utils.conversions import hex_to_current
+            import numpy as np
+            import pandas as pd
+            import plotly.graph_objs as go
+            import plotly.offline as pyo
+
+            # Read the CSV files; each is now expected to have 2048 rows.
             df_x = pd.read_csv("acquired_data_X.csv", header=None)
             df_y = pd.read_csv("acquired_data_Y.csv", header=None)
-            x_profile = df_x[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
-            y_profile = df_y[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
-            step_size = 0.5
+
+            # Convert each hex string to a current value.
+            # This produces arrays of length 2048.
+            x_all = df_x[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
+            y_all = df_y[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
+
+            # Downsample the data to 128 points (2048/16 = 128).
+            x_profile = x_all[::16]
+            y_profile = y_all[::16]
+
+            # Define spatial axes using a given step size (adjust if needed).
+            step_size = 0.5  # e.g., 0.5 mm per measurement
             x_axis = np.arange(len(x_profile)) * step_size
             y_axis = np.arange(len(y_profile)) * step_size
+
+            # Compute the outer product to create a 2D beam intensity map.
             Z = np.outer(x_profile, y_profile)
+
+            # Create the heatmap with Plotly.
             heatmap = go.Heatmap(
                 z=Z,
                 x=x_axis,
@@ -248,6 +273,8 @@ class MainWindow(QWidget):
                 height=800,
                 margin=dict(l=65, r=50, b=65, t=90)
             )
+
+            # Generate the HTML for the plot and set it in the QWebEngineView.
             html_heatmap = pyo.plot(fig, include_plotlyjs='cdn', output_type='div')
             self.beam_view.setHtml(html_heatmap)
         except Exception as e:
@@ -312,6 +339,9 @@ class MainWindow(QWidget):
     @pyqtSlot()
     def on_sequence_finished(self):
         self.acq_output.append("Acquisition Sequence Finished.")
+        # Update both the graphs and the beam shape.
+        self.plot_graphs()
+        self.plot_beam_shape()
 
     @pyqtSlot()
     def on_program_upload(self):

@@ -28,7 +28,7 @@ class AcqSequenceWorker(QObject):
         ]
         self.current_profile_index = 0
         self.current_profile = None
-        self.collected_data = []
+        self.collected_data = []  # For dump data: list of 128 rows (each row is a list of 16 words)
 
         # For polling “F” responses.
         self.polling_attempts = 0
@@ -41,7 +41,6 @@ class AcqSequenceWorker(QObject):
         Start the sequence by sending the initial commands.
         Locks the acquisition mutex (acq_mutex) for the entire duration.
         """
-        # Lock the acquisition mutex.
         acq_mutex.lock()
         self._mutex_locked = True
 
@@ -97,7 +96,6 @@ class AcqSequenceWorker(QObject):
             self.finished.emit()
             return
 
-        # If all motor profiles have been processed, finish the sequence.
         if self.current_profile_index >= len(self.motor_profiles):
             print("[AcqSequenceWorker] All motor profiles processed. Finishing sequence.")
             self._release_mutex_if_needed()
@@ -111,15 +109,35 @@ class AcqSequenceWorker(QObject):
             self.acq_model.send_serial_data("A")
             # Step 3: Send the motor’s drive command.
             self.motor_model.send_command(self.current_profile['drive'])
+            # Send the appropriate SC command.
+            if self.current_profile['label'] == "X":
+                self.acq_model.send_serial_data("SC,002,005")
+            elif self.current_profile['label'] == "Y":
+                self.acq_model.send_serial_data("SC,008,005")
+            # Wait for the "OK" response before proceeding.
+            QTimer.singleShot(100, self.waitForSCResponse)
         except Exception as e:
             self.errorOccurred.emit(f"Error sending commands for motor {self.current_profile['label']}: {e}")
             self._release_mutex_if_needed()
             self.finished.emit()
             return
 
-        # Step 4: Start polling for the "F" response.
-        self.polling_attempts = 0
-        QTimer.singleShot(100, self.pollForResponse)
+    def waitForSCResponse(self):
+        """
+        Wait for the "OK" response after sending the SC command.
+        This method does not assume a maximum number of attempts; it will keep waiting until an "OK" is received.
+        """
+        try:
+            response = self.acq_model.read_serial_data()
+            print(f"[AcqSequenceWorker] SC response: '{response}'")
+            if response and "OK" in response:
+                QTimer.singleShot(100, self.pollForResponse)
+            else:
+                QTimer.singleShot(100, self.waitForSCResponse)
+        except Exception as e:
+            self.errorOccurred.emit(f"Error waiting for SC response: {e}")
+            self._release_mutex_if_needed()
+            self.finished.emit()
 
     def pollForResponse(self):
         """
@@ -131,16 +149,15 @@ class AcqSequenceWorker(QObject):
             return
 
         try:
-            # Resend the polling command "A" for each poll
             self.acq_model.send_serial_data("A")
             response = self.acq_model.read_serial_data()
             print(f"[AcqSequenceWorker] Polling ({self.current_profile['label']}): received '{response}'")
             if response == "F":
-                # Once "F" is received, proceed with the data dump
+                # Once "F" is received, send the DUMP command.
                 self.acq_model.send_serial_data("D")
                 print(f"[AcqSequenceWorker] Sent 'D' command for {self.current_profile['label']} motor.")
-                self.collected_data = []
-                QTimer.singleShot(100, self.collectData)
+                self.collected_data = []  # Reset dump data collection
+                QTimer.singleShot(100, lambda: self.collectDumpData(0))
             else:
                 self.polling_attempts += 1
                 if self.polling_attempts > self.max_poll_attempts:
@@ -151,16 +168,16 @@ class AcqSequenceWorker(QObject):
                     self._release_mutex_if_needed()
                     self.finished.emit()
                     return
-                # Poll again after a short delay.
                 QTimer.singleShot(100, self.pollForResponse)
         except Exception as e:
             self.errorOccurred.emit(f"Error in pollForResponse(): {e}")
             self._release_mutex_if_needed()
             self.finished.emit()
 
-    def collectData(self):
+    def collectDumpData(self, line_count):
         """
-        Collect data lines from the acquisition card until the termination string is received.
+        Collect exactly 128 lines of dump data from the acquisition card.
+        Each line is expected to contain 16 comma‐separated words.
         """
         if not self._running:
             self._release_mutex_if_needed()
@@ -168,47 +185,53 @@ class AcqSequenceWorker(QObject):
             return
 
         try:
-            data_line = self.acq_model.read_serial_data()
-            print(f"[AcqSequenceWorker] Data line ({self.current_profile['label']}): {data_line}")
-            if data_line == "00000000,00000000":
-                self.saveData()
+            line = self.acq_model.read_serial_data()
+            print(f"[AcqSequenceWorker] Dump line {line_count+1}: {line}")
+            if line.strip().startswith("ERR"):
+                self.errorOccurred.emit(f"DUMP command error response: {line.strip()}")
+                self._release_mutex_if_needed()
+                self.finished.emit()
+                return
+
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) != 16:
+                self.errorOccurred.emit(f"Unexpected number of words in dump line {line_count+1}: {line}")
+                self._release_mutex_if_needed()
+                self.finished.emit()
+                return
+
+            self.collected_data.append(parts)
+
+            if line_count + 1 < 128:
+                QTimer.singleShot(10, lambda: self.collectDumpData(line_count + 1))
             else:
-                self.collected_data.append(data_line)
-                QTimer.singleShot(100, self.collectData)
+                self.saveDumpData()
         except Exception as e:
-            self.errorOccurred.emit(f"Error in collectData(): {e}")
+            self.errorOccurred.emit(f"Error in collectDumpData: {e}")
             self._release_mutex_if_needed()
             self.finished.emit()
 
-    def saveData(self):
+    def saveDumpData(self):
         """
-        Save only the first channel of the collected data into a CSV file.
+        Save the collected dump data to the CSV file.
+        Each word is written on a new line.
         """
-        if not self._running:
-            self._release_mutex_if_needed()
-            self.finished.emit()
-            return
-
         try:
             with open(self.current_profile['csv'], 'w', newline='') as csv_file:
                 writer = csv.writer(csv_file)
-                for item in self.collected_data:
-                    # Each item is assumed to be a string like "data_channel1,data_channel2"
-                    # We split on the comma and take only the first element.
-                    first_channel = item.split(',')[0]
-                    writer.writerow([first_channel])
-            print(
-                f"[AcqSequenceWorker] Data saved to {self.current_profile['csv']} for {self.current_profile['label']} motor.")
+                for row in self.collected_data:
+                    for word in row:
+                        writer.writerow([word])
+            print(f"[AcqSequenceWorker] Dump data saved to {self.current_profile['csv']} for {self.current_profile['label']} motor.")
         except Exception as e:
-            self.errorOccurred.emit(f"Error in saveData(): {e}")
+            self.errorOccurred.emit(f"Error saving dump data: {e}")
 
         self.current_profile_index += 1
-
-        # If there are more profiles, start the next one; otherwise, finish the sequence.
         if self.current_profile_index < len(self.motor_profiles):
             QTimer.singleShot(1000, self.startMotorProfile)
         else:
             print("[AcqSequenceWorker] Completed all motor profiles. Finishing sequence.")
+            self.v
             self._release_mutex_if_needed()
             self.finished.emit()
 
