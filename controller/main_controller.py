@@ -46,9 +46,16 @@ class MainController(QObject):
             self.errorOccurred.emit(f"Error sending motor command: {e}")
 
     def sendAcqCommand(self, command: str):
-        """Send a command to the acquisition card."""
+        """
+        Send a command to the acquisition card and emit the response.
+        Previously, this method only sent the command.
+        Now it reads the response and emits it so that the Acq data display is updated.
+        """
         try:
             self.acq_model.send_serial_data(command)
+            # Read the response from the acq card
+            response = self.acq_model.read_serial_data()
+            self.acqDataReceived.emit(response)
         except Exception as e:
             self.errorOccurred.emit(f"Error sending acq command: {e}")
 

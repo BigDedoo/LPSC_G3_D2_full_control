@@ -187,7 +187,7 @@ class MainWindow(QWidget):
         try:
             from utils.conversions import hex_to_current
             import numpy as np
-            df_x = pd.read_csv("acquired_data_X.csv", header=None)
+            df_x = pd.read_csv("requested_data.csv", header=None)
             df_y = pd.read_csv("acquired_data_Y.csv", header=None)
             x_current = df_x[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
             y_current = df_y[0].apply(lambda hex_val: hex_to_current(str(hex_val))).to_numpy()
