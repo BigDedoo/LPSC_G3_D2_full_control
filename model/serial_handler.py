@@ -1,3 +1,5 @@
+# model/serial_handler.py
+
 import serial
 import threading
 import time
@@ -8,6 +10,7 @@ logger = logging.getLogger(__name__)
 class SerialHandler:
     """
     A low-level serial port communication class using pyserial.
+    Now implements context manager methods.
     """
     def __init__(self, port, baud_rate, timeout):
         self.port = port
@@ -51,3 +54,11 @@ class SerialHandler:
             except Exception as e:
                 logger.error(f"Error reading from serial port {self.port}: {e}")
                 return ""
+
+    # Context manager support.
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
