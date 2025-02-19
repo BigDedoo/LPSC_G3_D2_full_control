@@ -21,7 +21,8 @@ class MotorModel(QObject):
         self.serial_handler.open()
 
     def send_command(self, text_command: str) -> str:
-        if not self.serial_handler.ser or not self.serial_handler.ser.is_open:
+        # Use is_open from the new SerialHandler instead of checking 'ser'
+        if not self.serial_handler.is_open:
             return "<NAK>Serial port not open<ETX>"
         # Acquire the motor-specific mutex.
         locker = QMutexLocker(motor_mutex)
@@ -55,13 +56,13 @@ class MotorModel(QObject):
         print(command_bytes)
         if expected_response_length is None:
             return self.serial_handler.read_line().encode()
-        ser = self.serial_handler.ser
+        # Updated implementation: repeatedly call read_line until enough bytes are collected.
         start = time.time()
         received = b""
         while len(received) < expected_response_length and (time.time() - start) < timeout:
-            if ser.in_waiting:
-                received += ser.read(ser.in_waiting)
-            time.sleep(0.1)
+            line = self.serial_handler.read_line()
+            if line:
+                received += line.encode()
         return received
 
     def close(self):

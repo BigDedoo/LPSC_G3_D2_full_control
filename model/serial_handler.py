@@ -1,64 +1,58 @@
 # model/serial_handler.py
 
-import serial
-import threading
-import time
 import logging
+from threading import Lock
+from cpp_serial_handler import CppSerialHandler
 
 logger = logging.getLogger(__name__)
 
 class SerialHandler:
     """
-    A low-level serial port communication class using pyserial.
-    Now implements context manager methods.
+    A serial port communication class using a C++ extension for improved performance.
     """
     def __init__(self, port, baud_rate, timeout):
         self.port = port
         self.baud_rate = baud_rate
         self.timeout = timeout
-        self.lock = threading.Lock()
-        self.ser = None
+        self.lock = Lock()
+        self.cpp_handler = CppSerialHandler(port, baud_rate, timeout)
+        self.is_open = False
 
     def open(self):
-        if not self.ser or not self.ser.is_open:
-            try:
-                self.ser = serial.Serial(self.port, self.baud_rate, timeout=self.timeout)
-                logger.info(f"Opened serial port {self.port} at {self.baud_rate} baud.")
-            except Exception as e:
-                logger.error(f"Error opening serial port {self.port}: {e}")
+        with self.lock:
+            if not self.is_open:
+                try:
+                    self.cpp_handler.open()
+                    self.is_open = True
+                    logger.info(f"Opened serial port {self.port} at {self.baud_rate} baud using C++ handler.")
+                except Exception as e:
+                    logger.error(f"Error opening serial port {self.port}: {e}")
 
     def close(self):
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-            logger.info(f"Closed serial port {self.port}.")
+        with self.lock:
+            if self.is_open:
+                try:
+                    self.cpp_handler.close()
+                    self.is_open = False
+                    logger.info(f"Closed serial port {self.port}.")
+                except Exception as e:
+                    logger.error(f"Error closing serial port {self.port}: {e}")
 
     def write_bytes(self, data: bytes):
         with self.lock:
-            if self.ser and self.ser.is_open:
-                try:
-                    self.ser.write(data)
-                    logger.debug(f"Written bytes to {self.port}: {data}")
-                except Exception as e:
-                    logger.error(f"Error writing to serial port {self.port}: {e}")
-            else:
-                logger.warning("Serial port is not open when trying to write.")
+            try:
+                self.cpp_handler.write_bytes(data)
+                logger.debug(f"Written bytes to {self.port}: {data}")
+            except Exception as e:
+                logger.error(f"Error writing to serial port {self.port}: {e}")
 
     def read_line(self) -> str:
         with self.lock:
-            if not self.ser or not self.ser.is_open:
-                return ""
             try:
-                line = self.ser.readline().decode(errors='replace').strip()
+                line_bytes = self.cpp_handler.read_line()
+                line = line_bytes.decode('utf-8', errors='replace').strip()
                 logger.debug(f"Read line from {self.port}: {line}")
                 return line
             except Exception as e:
                 logger.error(f"Error reading from serial port {self.port}: {e}")
                 return ""
-
-    # Context manager support.
-    def __enter__(self):
-        self.open()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
