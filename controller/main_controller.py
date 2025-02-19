@@ -1,5 +1,4 @@
 # controller/main_controller.py
-
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 import logging
 from controller.acq_sequence_worker import AcqSequenceWorker
@@ -12,33 +11,24 @@ from config import MOTOR_COM_PORT, ACQ_COM_PORT, BAUD_RATE, SERIAL_TIMEOUT
 logger = logging.getLogger(__name__)
 
 class MainController(QObject):
-    # Signals for communicating with the UI.
     acqDataReceived = pyqtSignal(str)
     motorResponseReceived = pyqtSignal(str)
     acqSequenceFinished = pyqtSignal()
     motorParametersUpdated = pyqtSignal(dict)
-    errorOccurred = pyqtSignal(str)  # Centralized error signal.
+    errorOccurred = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
-        # Initialize the motor and acquisition models.
         self.motor_model = MotorModel(MOTOR_COM_PORT, BAUD_RATE, SERIAL_TIMEOUT)
         self.acq_model = AcqModel(ACQ_COM_PORT, BAUD_RATE, SERIAL_TIMEOUT)
-
-        # Placeholders for the acquisition sequence worker/thread.
         self.acq_seq_thread = None
         self.acq_seq_worker = None
-
-        # Placeholders for the motor parameter poller thread/worker.
         self.motor_poll_thread = None
         self.motor_poller = None
-
-        # Placeholders for the acquisition data poller thread/worker.
         self.acq_data_poll_thread = None
         self.acq_data_poll_worker = None
 
     def sendMotorCommand(self, command: str):
-        """Send a command to the motor and emit the response."""
         try:
             response = self.motor_model.send_command(command)
             self.motorResponseReceived.emit(response)
@@ -46,24 +36,14 @@ class MainController(QObject):
             self.errorOccurred.emit(f"Error sending motor command: {e}")
 
     def sendAcqCommand(self, command: str):
-        """
-        Send a command to the acquisition card and emit the response.
-        Previously, this method only sent the command.
-        Now it reads the response and emits it so that the Acq data display is updated.
-        """
         try:
             self.acq_model.send_serial_data(command)
-            # Read the response from the acq card
             response = self.acq_model.read_serial_data()
             self.acqDataReceived.emit(response)
         except Exception as e:
             self.errorOccurred.emit(f"Error sending acq command: {e}")
 
     def startAcqSequence(self):
-        """
-        Start a new acquisition sequence using the event-driven worker.
-        Prevents starting if one is already running.
-        """
         if self.acq_seq_thread and self.acq_seq_thread.isRunning():
             return
 
@@ -77,10 +57,33 @@ class MainController(QObject):
         self.acq_seq_worker.finished.connect(self.acq_seq_worker.deleteLater)
         self.acq_seq_thread.finished.connect(lambda: setattr(self, 'acq_seq_thread', None))
         self.acq_seq_thread.finished.connect(self.acq_seq_thread.deleteLater)
+        # Connect worker signals to update UI
+        self.acq_seq_worker.motorResponse.connect(self.motorResponseReceived.emit)
+        self.acq_seq_worker.acqData.connect(self.acqDataReceived.emit)
+        self.acq_seq_thread.start()
+
+    def startAlternativeAcqSequence(self):
+        if self.acq_seq_thread and self.acq_seq_thread.isRunning():
+            return
+
+        from controller.alternative_acq_sequence_worker import AlternativeAcqSequenceWorker
+
+        self.acq_seq_thread = QThread()
+        self.acq_seq_worker = AlternativeAcqSequenceWorker(self.motor_model, self.acq_model)
+        self.acq_seq_worker.moveToThread(self.acq_seq_thread)
+        self.acq_seq_thread.started.connect(self.acq_seq_worker.run)
+        self.acq_seq_worker.finished.connect(lambda: self.acqDataReceived.emit("Alternative acquisition sequence finished."))
+        self.acq_seq_worker.finished.connect(lambda: setattr(self, 'acq_seq_worker', None))
+        self.acq_seq_worker.finished.connect(self.acq_seq_thread.quit)
+        self.acq_seq_worker.finished.connect(self.acq_seq_worker.deleteLater)
+        self.acq_seq_thread.finished.connect(lambda: setattr(self, 'acq_seq_thread', None))
+        self.acq_seq_thread.finished.connect(self.acq_seq_thread.deleteLater)
+        # Connect worker signals to update UI
+        self.acq_seq_worker.motorResponse.connect(self.motorResponseReceived.emit)
+        self.acq_seq_worker.acqData.connect(self.acqDataReceived.emit)
         self.acq_seq_thread.start()
 
     def stopAcqSequence(self):
-        """Request a graceful stop of the acquisition sequence."""
         if self.acq_seq_worker:
             self.acq_seq_worker.stop()
         if self.acq_seq_thread:
@@ -88,9 +91,6 @@ class MainController(QObject):
             self.acq_seq_thread.wait()
 
     def runMotorParameterPoller(self):
-        """
-        Start the motor parameter poller in its own thread to retrieve motor parameters.
-        """
         self.motor_poll_thread = QThread()
         self.motor_poller = MotorParameterPollerSingle(self.motor_model)
         self.motor_poller.moveToThread(self.motor_poll_thread)
@@ -100,9 +100,6 @@ class MainController(QObject):
         self.motor_poll_thread.start()
 
     def startProgramUpload(self, file_path: str, program_name: str):
-        """
-        Launch the program uploader in a separate thread.
-        """
         self.prog_upload_thread = QThread()
         self.prog_uploader = ProgramUploader(self.motor_model, file_path, program_name)
         self.prog_uploader.moveToThread(self.prog_upload_thread)
@@ -115,9 +112,6 @@ class MainController(QObject):
         self.prog_upload_thread.start()
 
     def startAcqDataPoller(self):
-        """
-        Start the acquisition data poller in its own thread to poll the acq card and save data.
-        """
         if self.acq_data_poll_thread and self.acq_data_poll_thread.isRunning():
             return
 
@@ -134,7 +128,6 @@ class MainController(QObject):
         self.acq_data_poll_thread.start()
 
     def cleanup(self):
-        """Clean up and stop all threads and close serial ports."""
         if self.acq_seq_worker:
             self.acq_seq_worker.stop()
         if self.acq_seq_thread:

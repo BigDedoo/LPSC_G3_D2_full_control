@@ -78,6 +78,11 @@ class MainWindow(QWidget):
         seq_layout.addWidget(self.start_seq_button)
         seq_layout.addWidget(self.stop_seq_button)
 
+        # --- Alternative sequence control button ---
+        alt_seq_layout = QHBoxLayout()
+        self.start_alt_seq_button = QPushButton("Start Alternative Sequence")
+        alt_seq_layout.addWidget(self.start_alt_seq_button)
+
         # --- New: Poll Acq Data button ---
         poll_acq_layout = QHBoxLayout()
         self.poll_acq_button = QPushButton("Poll Acq Data")
@@ -112,6 +117,7 @@ class MainWindow(QWidget):
         left_layout.addLayout(motor_layout)
         left_layout.addLayout(acq_layout)
         left_layout.addLayout(seq_layout)
+        left_layout.addLayout(alt_seq_layout)
         left_layout.addLayout(poll_acq_layout)  # Added Poll Acq Data button
         left_layout.addLayout(stop_layout)
         left_layout.addWidget(QLabel("Motor Responses:"))
@@ -285,6 +291,7 @@ class MainWindow(QWidget):
         self.acq_send_button.clicked.connect(self.on_acq_send)
         self.start_seq_button.clicked.connect(self.controller.startAcqSequence)
         self.stop_seq_button.clicked.connect(self.controller.stopAcqSequence)
+        self.start_alt_seq_button.clicked.connect(self.on_start_alt_seq)
         self.poll_motor_button.clicked.connect(self.on_poll_motor)
         self.poll_acq_button.clicked.connect(self.on_poll_acq)  # Connect new Poll Acq Data button
         self.stop_x_button.clicked.connect(self.on_stop_x)
@@ -357,6 +364,11 @@ class MainWindow(QWidget):
                 prog_name = prog_name[:8]
             self.acq_output.append(f"Uploading program '{prog_name}' from {file_path}...")
             self.controller.startProgramUpload(file_path, prog_name)
+
+    @pyqtSlot()
+    def on_start_alt_seq(self):
+        self.acq_output.append("Starting Alternative Acquisition Sequence...")
+        self.controller.startAlternativeAcqSequence()
 
     def closeEvent(self, event):
         self.controller.cleanup()
