@@ -33,7 +33,8 @@ class AcqModel(QObject):
 
     def send_serial_data(self, command: str):
         locker = QMutexLocker(acq_mutex)
-        if not self.serial_handler.ser or not self.serial_handler.ser.is_open:
+        # Updated check: use is_open instead of non-existent 'ser'
+        if not self.serial_handler.is_open:
             logger.error("Acquisition serial port not open")
             return
         try:
